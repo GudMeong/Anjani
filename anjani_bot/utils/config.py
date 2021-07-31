@@ -20,7 +20,6 @@ from typing import Union
 
 from dotenv import load_dotenv
 
-
 __all__ = ["BotConfig"]
 
 
@@ -48,3 +47,7 @@ class BotConfig:
 
         # Manager required
         self.owner_id = int(os.environ.get("OWNER_ID", 0))
+
+        # Spam prediction testing
+        self.predict_api = os.environ.get("SP_API", None)
+        self.predict_url = os.environ.get("SP_URL", None)
