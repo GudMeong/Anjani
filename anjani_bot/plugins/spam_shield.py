@@ -50,8 +50,8 @@ class SpamShield(plugin.Plugin):
         self.spmwtc = self.bot.get_config.spamwatch_api
 
         self.predict_api = self.bot.get_config.predict_api
-        self.predict_url = self.bot.get_config.predict_url
         if self.predict_api:
+            self.predict_url = self.bot.get_config.predict_url
             self.spam_db = self.bot.get_collection("SPAM_DUMP")
 
     async def __migrate__(self, old_chat, new_chat):
@@ -147,7 +147,7 @@ class SpamShield(plugin.Plugin):
                     [
                         old_btn[0],
                         InlineKeyboardButton(
-                            text=f"❌ Wrong ({total})", callback_data=f"spam_check_f{user_list}"
+                            text=f"❌ Incorrect ({total})", callback_data=f"spam_check_f{user_list}"
                         ),
                     ]
                 ]
@@ -174,17 +174,17 @@ class SpamShield(plugin.Plugin):
             data = await self.spam_db.find_one({"_id": text_hash})
             if data:  # Don't send any duplicates
                 return
-
+            prob = str(prob * 10 ** 2)[0:7]  # Convert to str to prevent rounding
             text = (
-                "#SPAM_PREDICTION\n"
-                f"**Prediction Result:** `{(prob*100):.2f}`\n"
+                "#SPAM_PREDICTION\n\n"
+                f"**Prediction Result:** `{prob}`\n"
                 f"**Message Hash:** `{text_hash}`\n"
                 f"\n**====== CONTENT =======**\n\n{message.text}"
             )
             await self.bot.client.send_message(
                 chat_id=-1001314588569,
                 text=text,
-                disable_web_page_preview=False,
+                disable_web_page_preview=True,
                 reply_markup=InlineKeyboardMarkup(
                     [
                         [
@@ -193,7 +193,7 @@ class SpamShield(plugin.Plugin):
                                 callback_data=f"spam_check_t[]",
                             ),
                             InlineKeyboardButton(
-                                text="❌ Wrong (0)",
+                                text="❌ Incorrect (0)",
                                 callback_data=f"spam_check_f[]",
                             ),
                         ]
@@ -202,7 +202,15 @@ class SpamShield(plugin.Plugin):
             )
             await self.spam_db.update_one(
                 {"_id": text_hash},
-                {"$set": {"text": message.text.strip(), "spam": 0, "ham": 0}},
+                {
+                    "$set": {
+                        "text": message.text.strip(),
+                        "spam": 0,
+                        "ham": 0,
+                        "chat": message.chat.id,
+                        "id": message.from_user.id,
+                    }
+                },
                 upsert=True,
             )
 
