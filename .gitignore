@@ -4,6 +4,9 @@ __pycache__/
 *.env
 !sample_config.env
 
+# spam prediction model
+predict_model.pkl
+
 # file
 *.pyc
 *.log

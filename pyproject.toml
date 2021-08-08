@@ -40,6 +40,7 @@ spamwatch = "^0.3.0"
 TgCrypto = "^1.2.2"
 toml = "^0.10.2"
 uvloop = {version ="^0.15.2", optional = true}
+scikit-learn = "0.24.2"
 
 [tool.poetry.dev-dependencies]
 black = "^21.5b1"

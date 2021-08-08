@@ -15,12 +15,14 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
 import time
 from typing import ClassVar, Dict, Union
 
+import joblib
 import spamwatch
 from motor.motor_asyncio import AsyncIOMotorCollection
 from pyrogram import StopPropagation, filters
@@ -49,10 +51,28 @@ class SpamShield(plugin.Plugin):
         self.lock = asyncio.Lock()
         self.spmwtc = self.bot.get_config.spamwatch_api
 
-        self.predict_api = self.bot.get_config.predict_api
-        if self.predict_api:
-            self.predict_url = self.bot.get_config.predict_url
+        gh_token = self.bot.get_config.gh_token
+        self.run_predict = False
+        if gh_token:
             self.spam_db = self.bot.get_collection("SPAM_DUMP")
+            predict_url = self.bot.get_config.predict_url
+            if predict_url:
+                self.log.info("Downloading spam prediction model")
+                async with self.bot.http.get(
+                    predict_url,
+                    headers={
+                        "Authorization": f"token {gh_token}",
+                        "Accept": "application/vnd.github.v3.raw",
+                    },
+                ) as res:
+                    if res.status == 200:
+                        with open("predict_model.pkl", "wb") as file:
+                            file.write(await res.read())
+                        self.model = joblib.load("predict_model.pkl")
+                        self.run_predict = True
+                        self.log.info("Model loaded")
+                        return
+            self.log.warning("Failed to donwload spam prediction model!")
 
     async def __migrate__(self, old_chat, new_chat):
         async with self.lock:
@@ -70,6 +90,13 @@ class SpamShield(plugin.Plugin):
                 )
         elif not data:
             return await self.gban_setting.find_one({"chat_id": chat_id}, {"_id": False})
+
+    def _build_hash(self, content):
+        return hashlib.sha256(content.strip().encode()).hexdigest()
+
+    @pool.run_in_thread
+    def _predict(self, text: str):
+        return self.model.predict_proba([text])
 
     @pool.run_in_thread
     def sw_check(self, user_id: int) -> Union[Ban, None]:
@@ -171,26 +198,22 @@ class SpamShield(plugin.Plugin):
                 ]
             ]
         )
-
-        await self.spam_db.update_one(
-            {"_id": content_hash[0]}, {"$set": {"spam": total_correct, "ham": total_incorrect}}
+        await asyncio.gather(
+            self.spam_db.update_one(
+                {"_id": content_hash},
+                {"$set": {"spam": total_correct, "ham": total_incorrect}},
+            ),
+            query.edit_message_reply_markup(reply_markup=button),
         )
-        await query.edit_message_reply_markup(reply_markup=button)
 
     async def predict(self, message):
-        """Add spam prediction test"""
-        async with self.bot.http.post(
-            self.predict_url,
-            headers={"Authorization": f"Bearer {self.predict_api}"},
-            json={"msg": message.text.strip()},
-        ) as req:
-            if req.status != 200:
-                return
-            res = await req.json()
+        text = message.text or message.caption
+        text = repr(text.strip())
+        res = await self._predict(text)
 
-        prob = res["spam_probability"]
+        prob = res[0][1]
         if prob >= 0.6:
-            text_hash = res["text_hash"]
+            text_hash = self._build_hash(text)
             data = await self.spam_db.find_one({"_id": text_hash})
             if data:  # Don't send any duplicates
                 return
@@ -201,37 +224,39 @@ class SpamShield(plugin.Plugin):
                 f"**Message Hash:** `{text_hash}`\n"
                 f"\n**====== CONTENT =======**\n\n{message.text}"
             )
-            await self.bot.client.send_message(
-                chat_id=-1001314588569,
-                text=text,
-                disable_web_page_preview=True,
-                reply_markup=InlineKeyboardMarkup(
-                    [
-                        [
-                            InlineKeyboardButton(
-                                text="✅ Correct (0)",
-                                callback_data=f"spam_check_t[]",
-                            ),
-                            InlineKeyboardButton(
-                                text="❌ Incorrect (0)",
-                                callback_data=f"spam_check_f[]",
-                            ),
-                        ]
-                    ]
+            await asyncio.gather(
+                self.spam_db.update_one(
+                    {"_id": text_hash},
+                    {
+                        "$set": {
+                            "text": message.text.strip(),
+                            "spam": 0,
+                            "ham": 0,
+                            "chat": message.chat.id,
+                            "id": message.from_user.id,
+                        }
+                    },
+                    upsert=True,
                 ),
-            )
-            await self.spam_db.update_one(
-                {"_id": text_hash},
-                {
-                    "$set": {
-                        "text": message.text.strip(),
-                        "spam": 0,
-                        "ham": 0,
-                        "chat": message.chat.id,
-                        "id": message.from_user.id,
-                    }
-                },
-                upsert=True,
+                self.bot.client.send_message(
+                    chat_id=-1001314588569,
+                    text=text,
+                    disable_web_page_preview=True,
+                    reply_markup=InlineKeyboardMarkup(
+                        [
+                            [
+                                InlineKeyboardButton(
+                                    text="✅ Correct (0)",
+                                    callback_data=f"spam_check_t[]",
+                                ),
+                                InlineKeyboardButton(
+                                    text="❌ Incorrect (0)",
+                                    callback_data=f"spam_check_f[]",
+                                ),
+                            ]
+                        ]
+                    ),
+                ),
             )
 
     async def shield_pref(self, chat_id, setting: bool):
@@ -264,7 +289,11 @@ class SpamShield(plugin.Plugin):
         except (ChannelPrivate, UserNotParticipant):
             pass
 
-        if self.predict_api and message.text:
+        if (
+            self.run_predict
+            and message.from_user.id not in self.bot.staff_id
+            and (message.text or message.caption)
+        ):
             self.bot.loop.create_task(self.predict(message))
 
     async def check_and_ban(self, user, chat_id):
@@ -315,3 +344,51 @@ class SpamShield(plugin.Plugin):
         else:
             setting = await self.chat_gban(message.chat.id)
             await message.reply_text(await self.bot.text(chat_id, "spamshield-view", setting))
+
+    @listener.on("spam", staff_only=True)
+    async def spam_log(self, message):
+        """Manual spam detection by bot staff"""
+        if message.chat.type != "private":
+            return await message.reply_text("This command only avaliable on PM's!")
+
+        user_id = None
+        if message.reply_to_message:
+            content = message.reply_to_message.text or message.reply_to_message.caption
+            if message.reply_to_message.forward_from:
+                user_id = message.reply_to_message.forward_from.user.id
+        else:
+            text = message.text.split(" ", 1)
+            if len(text) < 2:
+                return await message.reply_text(
+                    "Give me a text or reply to a message / forwarded message"
+                )
+            content = text[1].strip()
+
+        content_hash = self._build_hash(content)
+
+        text = (
+            "#SPAM\n\n"
+            f"**Message Hash:** `{content_hash}`\n"
+            f"\n**====== CONTENT =======**\n\n{content}"
+        )
+
+        await asyncio.gather(
+            self.spam_db.update_one(
+                {"_id": content_hash},
+                {
+                    "$set": {
+                        "text": content.strip(),
+                        "spam": 1,
+                        "ham": 0,
+                        "chat": None,
+                        "id": user_id,
+                    }
+                },
+                upsert=True,
+            ),
+            await self.bot.client.send_message(
+                chat_id=-1001314588569,
+                text=text,
+                disable_web_page_preview=True,
+            ),
+        )
