@@ -113,49 +113,69 @@ class SpamShield(plugin.Plugin):
 
     @listener.on(filters=filters.regex(r"spam_check_(t|f)\[(.*?)\]"), update="callbackquery")
     async def spam_vote(self, query):
-        correct = re.match(r"spam_check_t(.*?)", query.data)
-        wrong = re.match(r"spam_check_f(.*?)", query.data)
-        user_list = re.findall("[0-9]+", query.data)
-        t_hash = re.search(r"([A-Fa-f0-9]{64})", query.message.text)
+        message = query.message
+        content_hash = re.compile(r"([A-Fa-f0-9]{64})").search(message.text)
         author = str(query.from_user.id)
-        if author in user_list:
-            user_list.remove(author)
-            value = -1
-        else:
-            user_list.append(author)
-            value = 1
+        users_on_correct = users_on_incorrect = []
+        total_correct = total_incorrect = 0
 
-        total = len(user_list)
-        user_list = f"[{', '.join(user_list)}]"
-        old_btn = query.message.reply_markup.inline_keyboard[0]
+        if not content_hash:
+            self.log.warning("Can't get hash from 'MessageID: %d'", message.message_id)
+            return
+
+        correct = re.compile(r"spam_check_t(.*?)").match(query.data)
+        if message.reply_markup and isinstance(message.reply_markup, InlineKeyboardMarkup):
+            data = message.reply_markup.inline_keyboard[0][0].callback_data
+            if isinstance(data, bytes):
+                data = data.decode()
+
+            users_on_correct = re.findall("[0-9]+", data)
+
+        incorrect = re.compile(r"spam_check_f(.*?)").match(query.data)
+        if message.reply_markup and isinstance(message.reply_markup, InlineKeyboardMarkup):
+            data = message.reply_markup.inline_keyboard[0][1].callback_data
+            if isinstance(data, bytes):
+                data = data.decode()
+
+            users_on_incorrect = re.findall("[0-9]+", data)
+
         if correct:
-            label = "spam"
-            btn = InlineKeyboardMarkup(
+            if author in users_on_incorrect:  # Check user in incorrect data
+                users_on_incorrect.remove(author)
+            if author in users_on_correct:
+                users_on_correct.remove(author)
+            else:
+                users_on_correct.append(author)
+        elif incorrect:
+            if author in users_on_correct:  # Check user in correct data
+                users_on_correct.remove(author)
+            if author in users_on_incorrect:
+                users_on_incorrect.remove(author)
+            else:
+                users_on_incorrect.append(author)
+
+        total_correct, total_incorrect = len(users_on_correct), len(users_on_incorrect)
+        users_on_correct = f"[{', '.join(users_on_correct)}]"
+        users_on_incorrect = f"[{', '.join(users_on_incorrect)}]"
+        button = InlineKeyboardMarkup(
+            [
                 [
-                    [
-                        InlineKeyboardButton(
-                            text=f"✅ Correct ({total})", callback_data=f"spam_check_t{user_list}"
-                        ),
-                        old_btn[1],
-                    ]
+                    InlineKeyboardButton(
+                        text=f"✅ Correct ({total_correct})",
+                        callback_data=f"spam_check_t{users_on_correct}",
+                    ),
+                    InlineKeyboardButton(
+                        text=f"❌ Incorrect ({total_incorrect})",
+                        callback_data=f"spam_check_f{users_on_incorrect}",
+                    ),
                 ]
-            )
-        elif wrong:
-            label = "ham"
-            btn = InlineKeyboardMarkup(
-                [
-                    [
-                        old_btn[0],
-                        InlineKeyboardButton(
-                            text=f"❌ Incorrect ({total})", callback_data=f"spam_check_f{user_list}"
-                        ),
-                    ]
-                ]
-            )
-        await self.spam_db.update_one(
-            {"_id": t_hash.group(1)}, {"$inc": {label: value}}, upsert=False
+            ]
         )
-        await query.edit_message_reply_markup(reply_markup=btn)
+
+        await self.spam_db.update_one(
+            {"_id": content_hash[0]}, {"$set": {"spam": total_correct, "ham": total_incorrect}}
+        )
+        await query.edit_message_reply_markup(reply_markup=button)
 
     async def predict(self, message):
         """Add spam prediction test"""
@@ -245,7 +265,7 @@ class SpamShield(plugin.Plugin):
             pass
 
         if self.predict_api and message.text:
-            await self.predict(message)
+            self.bot.loop.create_task(self.predict(message))
 
     async def check_and_ban(self, user, chat_id):
         """Shield Check users."""
