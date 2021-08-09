@@ -200,7 +200,7 @@ class SpamShield(plugin.Plugin):
         )
         await asyncio.gather(
             self.spam_db.update_one(
-                {"_id": content_hash},
+                {"_id": content_hash[0]},
                 {"$set": {"spam": total_correct, "ham": total_incorrect}},
             ),
             query.edit_message_reply_markup(reply_markup=button),
@@ -355,7 +355,7 @@ class SpamShield(plugin.Plugin):
         if message.reply_to_message:
             content = message.reply_to_message.text or message.reply_to_message.caption
             if message.reply_to_message.forward_from:
-                user_id = message.reply_to_message.forward_from.user.id
+                user_id = message.reply_to_message.forward_from.id
         else:
             text = message.text.split(" ", 1)
             if len(text) < 2:
@@ -386,7 +386,7 @@ class SpamShield(plugin.Plugin):
                 },
                 upsert=True,
             ),
-            await self.bot.client.send_message(
+            self.bot.client.send_message(
                 chat_id=-1001314588569,
                 text=text,
                 disable_web_page_preview=True,
