@@ -207,13 +207,12 @@ class SpamShield(plugin.Plugin):
         )
 
     async def predict(self, message):
-        text = message.text or message.caption
-        text = repr(text.strip())
-        res = await self._predict(text)
+        content = message.text or message.caption
+        res = await self._predict(repr(content.strip()))
 
         prob = res[0][1]
         if prob >= 0.6:
-            text_hash = self._build_hash(text)
+            text_hash = self._build_hash(content)
             data = await self.spam_db.find_one({"_id": text_hash})
             if data:  # Don't send any duplicates
                 return
@@ -222,14 +221,14 @@ class SpamShield(plugin.Plugin):
                 "#SPAM_PREDICTION\n\n"
                 f"**Prediction Result:** `{prob}`\n"
                 f"**Message Hash:** `{text_hash}`\n"
-                f"\n**====== CONTENT =======**\n\n{message.text}"
+                f"\n**====== CONTENT =======**\n\n{content}"
             )
             await asyncio.gather(
                 self.spam_db.update_one(
                     {"_id": text_hash},
                     {
                         "$set": {
-                            "text": message.text.strip(),
+                            "text": content.strip(),
                             "spam": 0,
                             "ham": 0,
                             "chat": message.chat.id,
