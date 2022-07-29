@@ -38,7 +38,6 @@ def sec() -> int:
 
 def format_duration_us(t_us: Union[int, float]) -> str:
     """Formats the given microsecond duration as a string."""
-
     t_us = int(t_us)
 
     t_ms = t_us / 1000
@@ -49,23 +48,23 @@ def format_duration_us(t_us: Union[int, float]) -> str:
 
     if t_d >= 1:
         rem_h = t_h % 24
-        return "%dd %dh" % (t_d, rem_h)
+        return f"{int(t_d)}d {int(rem_h)}h"
 
     if t_h >= 1:
         rem_m = t_m % 60
-        return "%dh %dm" % (t_h, rem_m)
+        return f"{int(t_h)}h {int(rem_m)}m"
 
     if t_m >= 1:
         rem_s = t_s % 60
-        return "%dm %ds" % (t_m, rem_s)
+        return f"{int(t_m)}m {int(rem_s)}s"
 
     if t_s >= 1:
-        return "%d sec" % t_s
+        return f"{int(t_s)}s"
 
     if t_ms >= 1:
-        return "%d ms" % t_ms
+        return f"{int(t_ms)}ms"
 
-    return "%d μs" % t_us
+    return f"{int(t_us)}us"
 
 
 def extract_time(time_text: str) -> Union[int, bool]:
