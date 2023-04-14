@@ -1,5 +1,5 @@
 """ Admin Plugin, Can manage your Group. """
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -20,12 +20,15 @@ from typing import ClassVar, Optional
 from pyrogram.enums.chat_member_status import ChatMemberStatus
 from pyrogram.enums.chat_type import ChatType
 from pyrogram.errors import (
+    BotChannelsNa,
     ChatAdminRequired,
     FloodWait,
     UserAdminInvalid,
+    UserCreator,
     UserIdInvalid,
+    UserPrivacyRestricted,
 )
-from pyrogram.types import Chat, User
+from pyrogram.types import Chat, ChatPrivileges, User
 
 from anjani import command, filters, plugin, util
 
@@ -137,27 +140,29 @@ class Admins(plugin.Plugin):
             if ctx.input:
                 return await self.text(chat.id, "err-peer-invalid")
 
-            if not ctx.msg.reply_to_message:
+            if not ctx.msg.reply_to_message or not ctx.msg.reply_to_message.from_user:
                 return await self.text(chat.id, "no-promote-user")
 
             user = ctx.msg.reply_to_message.from_user
 
-        if not user:  # Check again
-            return await self.text(chat.id, "no-promote-user")
-
-        if user.id == ctx.author.id and ctx.input:
+        if user.id == ctx.author.id:
             return await self.text(chat.id, "promote-error-self")
 
         if user.id == self.bot.uid:
             return await self.text(chat.id, "error-its-myself")
 
         bot, _ = await util.tg.fetch_permissions(self.bot.client, chat.id, user.id)
+        if not bot:
+            return await self.text(chat.id, "promote-error-perm")
+
         try:
             await chat.promote_member(user_id=user.id, privileges=bot.privileges)
         except ChatAdminRequired:
             return await self.text(chat.id, "promote-error-perm")
         except UserIdInvalid:
             return await self.text(chat.id, "promote-error-invalid")
+        except UserPrivacyRestricted:
+            return await self.text(chat.id, "promote-error-privacy-restricted")
 
         return await self.text(chat.id, "promote-success")
 
@@ -172,23 +177,37 @@ class Admins(plugin.Plugin):
             if ctx.input:
                 return await self.text(chat.id, "err-peer-invalid")
 
-            if not ctx.msg.reply_to_message:
+            if not ctx.msg.reply_to_message or not ctx.msg.reply_to_message.from_user:
                 return await self.text(chat.id, "no-demote-user")
 
             user = ctx.msg.reply_to_message.from_user
 
-        if not user:  # Check again
-            return await self.text(chat.id, "no-demote-user")
-
-        if user.id == ctx.author.id and ctx.input:
+        if user.id == ctx.author.id:
             return await self.text(chat.id, "demote-error-self")
 
         if user.id == self.bot.uid:
             return await self.text(chat.id, "error-its-myself")
 
         try:
-            await chat.promote_member(user_id=user.id)
-        except ChatAdminRequired:
+            await chat.promote_member(
+                user_id=user.id,
+                privileges=ChatPrivileges(
+                    can_manage_chat=False,
+                    can_delete_messages=False,
+                    can_manage_video_chats=False,
+                    can_restrict_members=False,
+                    can_promote_members=False,
+                    can_change_info=False,
+                    can_post_messages=False,
+                    can_edit_messages=False,
+                    can_invite_users=False,
+                    can_pin_messages=False,
+                    is_anonymous=False,
+                ),
+            )
+        except (BotChannelsNa, ChatAdminRequired):
             return await self.text(chat.id, "demote-error-perm")
+        except UserCreator:
+            return await self.text(chat.id, "demote-error-creator")
 
         return await self.text(chat.id, "demote-success")

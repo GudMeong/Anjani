@@ -1,5 +1,5 @@
 """Anjani config"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -27,6 +27,9 @@ class TelegramConfig(MutableMapping[_KT, _VT]):
                 continue
 
             super().__setattr__(key, value)
+
+    def is_plugin_disabled(self, name: str) -> bool:
+        return name in self.__getattribute__("plugin_flag")
 
     def __contains__(self, k: _KT) -> bool:
         return k in self.__dict__

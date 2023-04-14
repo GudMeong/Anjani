@@ -1,5 +1,5 @@
 """Bot Greetings"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -18,6 +18,7 @@ import asyncio
 from html import escape
 from typing import Any, ClassVar, MutableMapping, Optional, Tuple
 
+from pyrogram.client import Client
 from pyrogram.enums.parse_mode import ParseMode
 from pyrogram.errors import ChannelPrivate, ChatWriteForbidden, MessageDeleteForbidden
 from pyrogram.types import Chat, Message, User
@@ -32,14 +33,8 @@ class Greeting(plugin.Plugin):
 
     db: util.db.AsyncCollection
 
-    # Late init
-    fed: Any
-
     async def on_load(self) -> None:
         self.db = self.bot.db.get_collection("WELCOME")
-
-    async def on_start(self, _: int) -> None:
-        self.fed = self.bot.plugins["SpamShield"]
 
     async def on_chat_action(self, message: Message) -> None:
         chat = message.chat
@@ -71,7 +66,7 @@ class Greeting(plugin.Plugin):
         if not text:
             text = await self.text(chat.id, "default-goodbye", noformat=True)
 
-        formatted_text = self._build_text(text, left_member, chat)
+        formatted_text = await self._build_text(text, left_member, chat, self.bot.client)
         try:
             msg = await self.bot.client.send_message(
                 chat.id,
@@ -103,18 +98,15 @@ class Greeting(plugin.Plugin):
                         reply_to_message_id=reply_to,
                     )
                 else:
-                    if await self.fed.is_active(chat.id) and await self.fed.is_banned(
-                        new_member.id
-                    ):
-                        continue
-
                     text, button = await self.welc_message(chat.id)
                     if not text:
                         string = await self.text(chat.id, "default-welcome", noformat=True)
                     else:
                         string = text
 
-                    formatted_text = self._build_text(string, new_member, chat)
+                    formatted_text = await self._build_text(
+                        string, new_member, chat, self.bot.client
+                    )
 
                     if button:
                         button = util.tg.build_button(button)
@@ -157,43 +149,50 @@ class Greeting(plugin.Plugin):
         await self.db.update_one({"chat_id": chat_id}, {"$set": data[self.name]}, upsert=True)
 
     @staticmethod
-    def _build_text(text: str, user: User, chat: Chat) -> str:
+    async def _build_text(
+        text: str, user: User, chat: Chat, client: Optional[Client] = None
+    ) -> str:
         first_name = user.first_name or ""  # Ensure first name is not None
         last_name = user.last_name
         full_name = first_name + last_name if last_name else first_name
+        try:
+            count = await client.get_chat_members_count(chat.id) if client else "N/A"
+        except ChannelPrivate:
+            count = "N/A"
+
         return text.format(
             first=escape(first_name),
             last=escape(last_name) if last_name else "",
             fullname=escape(full_name),
             username=f"@{user.username}" if user.username else user.mention,
             mention=user.mention,
-            count=chat.members_count,
+            count=count,
             chatname=escape(chat.title),
             id=user.id,
         )
 
     async def is_welcome(self, chat_id: int) -> bool:
         """Get chat welcome setting"""
-        active = await self.db.find_one({"chat_id": chat_id})
+        active = await self.db.find_one({"chat_id": chat_id}, {"should_welcome": 1})
         return active.get("should_welcome", True) if active else True
 
     async def is_goodbye(self, chat_id: int) -> bool:
         """Get chat welcome setting"""
-        active = await self.db.find_one({"chat_id": chat_id})
+        active = await self.db.find_one({"chat_id": chat_id}, {"should_goodbye": 1})
         return active.get("should_goodbye", True) if active else True
 
     async def welc_message(
         self, chat_id: int
     ) -> Tuple[Optional[str], Optional[Tuple[Tuple[str, str, bool]]]]:
         """Get chat welcome string"""
-        message = await self.db.find_one({"chat_id": chat_id})
+        message = await self.db.find_one({"chat_id": chat_id}, {"custom_welcome": 1, "button": 1})
         if message:
             return message.get("custom_welcome"), message.get("button")
 
         return await self.text(chat_id, "default-welcome", noformat=True), None
 
     async def left_message(self, chat_id: int) -> str:
-        message = await self.db.find_one({"chat_id": chat_id})
+        message = await self.db.find_one({"chat_id": chat_id}, {"custom_goodbye": 1})
         return (
             message.get(
                 "custom_goodbye", await self.text(chat_id, "default-goodbye", noformat=True)
@@ -204,7 +203,7 @@ class Greeting(plugin.Plugin):
 
     async def clean_service(self, chat_id: int) -> bool:
         """Fetch clean service setting"""
-        clean = await self.db.find_one({"chat_id": chat_id})
+        clean = await self.db.find_one({"chat_id": chat_id}, {"clean_service": 1})
         if clean:
             return clean.get("clean_service", True)
 
@@ -213,7 +212,6 @@ class Greeting(plugin.Plugin):
     async def set_custom_welcome(self, chat_id: int, text: Str) -> None:
         """Set custom welcome"""
         msg, button = util.tg.parse_button(text.markdown)
-        # print(msg)
         await self.db.update_one(
             {"chat_id": chat_id},
             {"$set": {"custom_welcome": msg, "button": button}},
@@ -246,30 +244,32 @@ class Greeting(plugin.Plugin):
         data = await self.db.find_one_and_update(
             {"chat_id": chat_id}, {"$set": {"prev_welc": msg_id}}, upsert=True
         )
-        return data.get("prev_welc", False) if data else False
+        return data.get("prev_welc", None) if data else None
 
     async def previous_goodbye(self, chat_id: int, msg_id: int) -> Optional[int]:
         data = await self.db.find_one_and_update(
             {"chat_id": chat_id}, {"$set": {"prev_gdby": msg_id}}, upsert=True
         )
-        return data.get("prev_gdby", False) if data else False
+        return data.get("prev_gdby", None) if data else None
 
     @command.filters(filters.admin_only)
     async def cmd_setwelcome(self, ctx: command.Context) -> str:
         """Set chat welcome message"""
         chat = ctx.chat
+        if ctx.input:
+            welc_text = Str(ctx.input).init(ctx.msg.entities[1:])
+        elif ctx.msg.reply_to_message:
+            welc_text = ctx.msg.reply_to_message.text or ctx.msg.reply_to_message.caption
+        else:
+            return await self.text(chat.id, "greetings-no-input")
 
-        if not ctx.msg.reply_to_message:
-            return await self.text(chat.id, "error-reply-to-message")
-
-        reply_msg = ctx.msg.reply_to_message
         try:  # Try to build a text first to check message validity
-            self._build_text(reply_msg.text, ctx.author, chat)
-        except KeyError as e:
+            await self._build_text(welc_text or "", ctx.author, chat, self.bot.client)
+        except (KeyError, ValueError) as e:
             return await self.text(chat.id, "err-msg-format-parsing", err=e)
 
         ret, _ = await asyncio.gather(
-            self.text(chat.id, "cust-welcome-set"), self.set_custom_welcome(chat.id, reply_msg.text)
+            self.text(chat.id, "cust-welcome-set"), self.set_custom_welcome(chat.id, welc_text)
         )
         return ret
 
@@ -277,13 +277,15 @@ class Greeting(plugin.Plugin):
     async def cmd_setgoodbye(self, ctx: command.Context) -> str:
         """Set chat goodbye message"""
         chat = ctx.chat
+        if ctx.input:
+            gby_text = Str(ctx.input).init(ctx.msg.entities[1:])
+        elif ctx.msg.reply_to_message:
+            gby_text = ctx.msg.reply_to_message.text or ctx.msg.reply_to_message.caption
+        else:
+            return await self.text(chat.id, "greetings-no-input")
 
-        if not ctx.msg.reply_to_message:
-            return await self.text(chat.id, "error-reply-to-message")
-
-        reply_msg = ctx.msg.reply_to_message
         ret, _ = await asyncio.gather(
-            self.text(chat.id, "cust-goodbye-set"), self.set_custom_goodbye(chat.id, reply_msg.text)
+            self.text(chat.id, "cust-goodbye-set"), self.set_custom_goodbye(chat.id, gby_text)
         )
         return ret
 

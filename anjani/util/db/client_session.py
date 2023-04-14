@@ -1,5 +1,5 @@
 """Anjani database session"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -35,7 +35,7 @@ from anjani import util
 
 from .base import AsyncBase
 from .errors import OperationFailure, PyMongoError
-from .types import ReadPreferences, Results
+from .typings import ReadPreferences, Results
 
 if TYPE_CHECKING:
     from .client import AsyncClient
@@ -137,35 +137,33 @@ class AsyncClientSession(AsyncBase):
                     ):
                         # Retry the entire transaction.
                         continue
-
                     raise
 
-                if not self.in_transaction:
-                    # Assume callback intentionally ended the transaction.
-                    return ret
+            if not self.in_transaction:
+                # Assume callback intentionally ended the transaction.
+                return ret
 
-                while True:
-                    try:
-                        await self.commit_transaction()
-                    except PyMongoError as exc:
-                        if (
-                            exc.has_error_label("UnknownTransactionCommitResult")
-                            and _within_time_limit(start_time)
-                            and not _max_time_expired_error(exc)
-                        ):
-                            # Retry the commit.
-                            continue
+            while True:
+                try:
+                    await self.commit_transaction()
+                except PyMongoError as exc:
+                    if (
+                        exc.has_error_label("UnknownTransactionCommitResult")
+                        and _within_time_limit(start_time)
+                        and not _max_time_expired_error(exc)
+                    ):
+                        # Retry the commit.
+                        continue
 
-                        if exc.has_error_label("TransientTransactionError") and _within_time_limit(
-                            start_time
-                        ):
-                            # Retry the entire transaction.
-                            break
+                    if exc.has_error_label("TransientTransactionError") and _within_time_limit(
+                        start_time
+                    ):
+                        # Retry the entire transaction.
+                        break
+                    raise
 
-                        raise
-
-                    # Commit succeeded.
-                    return ret
+                # Commit succeeded.
+                return ret
 
     def advance_cluster_time(self, cluster_time: Mapping[str, Any]) -> None:
         self.dispatch.advance_cluster_time(cluster_time=cluster_time)

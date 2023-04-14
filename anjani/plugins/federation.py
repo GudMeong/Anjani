@@ -1,5 +1,5 @@
 """Bot Federation Tools"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -16,13 +16,29 @@
 
 import asyncio
 from datetime import datetime
-from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Tuple, Union
+from typing import (
+    Any,
+    AsyncIterator,
+    Dict,
+    List,
+    Mapping,
+    MutableMapping,
+    Optional,
+    Union,
+)
 from uuid import uuid4
 
 from aiopath import AsyncPath
 from pyrogram.enums.chat_member_status import ChatMemberStatus
 from pyrogram.enums.chat_type import ChatType
-from pyrogram.errors import BadRequest, ChatAdminRequired, Forbidden, PeerIdInvalid
+from pyrogram.errors import (
+    BadRequest,
+    ChannelPrivate,
+    ChatAdminRequired,
+    Forbidden,
+    PeerIdInvalid,
+    UserAdminInvalid,
+)
 from pyrogram.types import (
     CallbackQuery,
     Chat,
@@ -87,9 +103,8 @@ class Federation(plugin.Plugin):
         old_priv = update.old_chat_member.privileges
         new_priv = update.new_chat_member.privileges
 
-        if (
-            (old_priv and old_priv.can_restrict_members)
-            and not (new_priv and new_priv.can_restrict_members)
+        if (old_priv and old_priv.can_restrict_members) and not (
+            new_priv and new_priv.can_restrict_members
         ):
             chat = update.chat
             fed_data = await self.get_fed_bychat(chat.id)
@@ -132,9 +147,10 @@ class Federation(plugin.Plugin):
             raise ValueError("Invalid callback data command")
 
     async def on_message(self, message: Message) -> None:
-        chat = message.chat
-        if not chat:
+        if message.outgoing or not message.chat:
             return
+
+        chat = message.chat
         if chat.type == ChatType.CHANNEL and message.text and message.text.startswith("/setfedlog"):
             return await self.channel_setlog(message)
 
@@ -159,6 +175,20 @@ class Federation(plugin.Plugin):
 
     async def get_fed(self, fid: str) -> Optional[Mapping[str, Any]]:
         return await self.db.find_one({"_id": fid})
+
+    async def _get_fed_subs_str(self, fid: str) -> Optional[str]:
+        """Get federation that subcribe current federation as string"""
+        res = ""
+        async for i in self.db.find({"subscribers": fid}):
+            res += f"- **{i['name']}** (`{i['_id']}`)\n"
+        return res or None
+
+    async def _get_fed_subs_data(self, fid: str) -> AsyncIterator[Mapping[str, Any]]:
+        """Get federation that subcribe current federation"""
+        async for i in self.db.find(
+            {"subscribers": fid}, {"_id": 1, "name": 1, "banned": 1, "banned_chat": 1}
+        ):
+            yield i
 
     async def fban_user(
         self,
@@ -211,51 +241,90 @@ class Federation(plugin.Plugin):
             {"_id": fid}, {"$unset": {f"banned_chat.{chat}": None}}, upsert=True
         )
 
-    async def check_fban(self, target: int) -> Tuple[Optional[util.db.AsyncCursor], bool]:
+    async def check_fban(self, target: int) -> util.db.AsyncCursor:
         """Check user banned list"""
-        query = {f"banned.{target}": {"$exists": True}}
-        query_chat = {f"banned_chat.{target}": {"$exists": True}}
-        projection = {f"banned.{target}": 1, "name": 1, "chats": 1}
-        projection_chat = {f"banned_chat.{target}": 1, "name": 1, "chats": 1}
-
-        if await self.db.count_documents(query) != 0:
-            return self.db.find(query, projection=projection), False
-        if await self.db.count_documents(query_chat) != 0:
-            return self.db.find(query_chat, projection=projection_chat), True
-        return None, False
+        return self.db.find(
+            {
+                "$or": [
+                    {f"banned.{target}": {"$exists": True}},
+                    {f"banned_chat.{target}": {"$exists": True}},
+                ]
+            },
+            {
+                "_id": 1,
+                "name": 1,
+                f"banned.{target}": 1,
+                f"banned_chat.{target}": 1,
+            },
+        )
 
     async def is_fbanned(self, chat: int, target: int) -> Optional[MutableMapping[str, Any]]:
-        data = await self.get_fed_bychat(chat)
-        if not data:
+        def check(target: int, data: Mapping[str, Any]) -> Optional[MutableMapping[str, Any]]:
+            """Scoped check to verify if user is banned"""
+            if str(target) in data.get("banned", {}):
+                user_data = data["banned"][str(target)]
+                user_data["fed_name"] = data["name"]
+                user_data["type"] = "user"
+                return user_data
+
+            if str(target) in data.get("banned_chat", {}):
+                channel_data = data["banned_chat"][str(target)]
+                channel_data["fed_name"] = data["name"]
+                channel_data["type"] = "chat"
+                return channel_data
+
+        data = await self.db.find_one(
+            {
+                "chats": chat,
+                "$or": [
+                    {f"banned.{target}": {"$exists": True}},
+                    {f"banned_chat.{target}": {"$exists": True}},
+                ],
+            },
+            {
+                f"banned.{target}": 1,
+                f"banned_chat.{target}": 1,
+                "name": 1,
+            },
+        )
+        if data:
+            res = check(target, data)
+            if res:
+                return res
+
+        # Check if user is banned in subcribed federation
+        fid = await self.get_fed_bychat(chat)
+        if not fid:
             return None
 
-        if str(target) in data.get("banned", {}):
-            user_data = data["banned"][str(target)]
-            user_data["fed_name"] = data["name"]
-            user_data["type"] = "user"
-            return user_data
-
-        if str(target) in data.get("banned_chat", {}):
-            channel_data = data["banned_chat"][str(target)]
-            channel_data["fed_name"] = data["name"]
-            channel_data["type"] = "chat"
-            return channel_data
-
-        return None
+        subscribe = [res async for res in self._get_fed_subs_data(fid["_id"])]
+        if not subscribe:
+            return None
+        for i in subscribe:
+            res = check(target, i)
+            if res:
+                res["subfed"] = True
+                return res
 
     async def fban_handler(
         self, chat: Chat, user: Union[User, Chat], data: MutableMapping[str, Any]
     ) -> None:
+        string = "fed-autoban"
+        if data["type"] != "user":
+            string += "-chat"
+        if data.get("subfed", False):
+            string += "-subfed"
+
         try:
             await asyncio.gather(
                 self.bot.client.send_message(
                     chat.id,
                     await self.text(
                         chat.id,
-                        "fed-autoban" if data["type"] == "user" else "fed-autoban-chat",
-                        user.mention if (
-                            data["type"] == "user" and isinstance(user, User)
-                        ) else data["title"],
+                        string,
+                        user.mention
+                        if (data["type"] == "user" and isinstance(user, User))
+                        else data["title"],
                         data["fed_name"],
                         data["reason"],
                         data["time"].strftime("%Y %b %d %H:%M UTC"),
@@ -263,8 +332,10 @@ class Federation(plugin.Plugin):
                 ),
                 self.bot.client.ban_chat_member(chat.id, user.id),
             )
-        except ChatAdminRequired:
-            self.log.debug(f"Can't ban user {user.username} on {chat.title}")
+        except (ChatAdminRequired, UserAdminInvalid) as e:
+            self.log.warning(
+                f"Can't ban user {user.username} on {chat.title} ({chat.id}) caused by {e}"
+            )
 
     async def cmd_newfed(self, ctx: command.Context, name: Optional[str] = None) -> str:
         """Create a new federations"""
@@ -479,7 +550,7 @@ class Federation(plugin.Plugin):
         if isinstance(owner, List):
             owner = owner[0]
 
-        return await self.text(
+        res = await self.text(
             chat.id,
             "fed-info-text",
             data["_id"],
@@ -489,7 +560,11 @@ class Federation(plugin.Plugin):
             len(data.get("banned", [])),
             len(data.get("banned_chat", [])),
             len(data.get("chats", [])),
+            len(data.get("subscribers", [])),
         )
+        if subs := await self._get_fed_subs_str(data["_id"]):
+            res += await self.text(chat.id, "fed-info-subscription") + f"{subs}"
+        return res
 
     @command.filters(aliases=["fedadmin", "fadmin", "fadmins"])
     async def cmd_fedadmins(self, ctx: command.Context, fid: Optional[str] = None) -> str:
@@ -605,6 +680,34 @@ class Federation(plugin.Plugin):
             reason,
         )
 
+    async def _propagate_fban(
+        self,
+        target: Union[User, Chat],
+        chats: List[int],
+        host_fed: str,
+        sub_fed: Optional[str] = None,
+    ) -> Mapping[int, str]:
+        """Propagate fban to each chat in the list"""
+        failed = {}
+        for chat in chats:
+            try:
+                await self.bot.client.ban_chat_member(chat, target.id)
+            except BadRequest as br:
+                self.log.warning(
+                    f"Failed to send fban on subfed {sub_fed} of {host_fed} at {chat} due to {br.MESSAGE}"
+                    if sub_fed
+                    else f"Failed to fban {target.username} on {chat} due to {br.MESSAGE}"
+                )
+                failed[chat] = br.MESSAGE
+            except (Forbidden, ChannelPrivate) as err:
+                self.log.warning(
+                    f"Can't fban on subfed {sub_fed} of {host_fed} at {chat} caused by {err.MESSAGE}"
+                    if sub_fed
+                    else f"Can't fban {target.username} on {chat} caused by {err.MESSAGE}"
+                )
+                failed[chat] = err.MESSAGE
+        return failed
+
     async def cmd_fban(
         self, ctx: command.Context, target: Union[User, Chat, None] = None, *, reason: str = ""
     ) -> Optional[str]:
@@ -656,20 +759,8 @@ class Federation(plugin.Plugin):
         else:
             return await self.text(chat.id, "err-peer-invalid")
 
-        failed: Dict[int, str] = {}
-        for chat in data["chats"]:
-            try:
-                await self.bot.client.ban_chat_member(chat, target.id)
-            except BadRequest as br:
-                self.log.warning(f"Failed to fban {target.username} on {chat} due to {br.MESSAGE}")
-                failed[chat] = br.MESSAGE
-            except Forbidden as err:
-                self.log.warning(
-                    f"Can't to fban {target.username} on {chat} caused by {err.MESSAGE}"
-                )
-                failed[chat] = err.MESSAGE
-
-        await ctx.respond(string)
+        await ctx.respond(f"Starting a federation ban for {target.id} in federation {data['name']}")
+        failed = await self._propagate_fban(target, data["chats"], data["_id"])
 
         text = ""
         if failed:
@@ -680,6 +771,17 @@ class Federation(plugin.Plugin):
             text += f"**Those chat has leaved the federation {data['name']}!**"
             await ctx.respond(text, mode="reply", reference=ctx.response)
 
+        if data.get("subscribers", []):
+            for fed_id in data["subscribers"]:
+                subs_data = await self.get_fed(fed_id)
+                if not subs_data:
+                    continue
+                await self._propagate_fban(
+                    target, subs_data.get("chats", []), data["_id"], subs_data["_id"]
+                )
+
+        await ctx.respond(string)
+
         # send message to federation log
         if log := data.get("log"):
             await self.bot.client.send_message(log, string, disable_web_page_preview=True)
@@ -688,9 +790,25 @@ class Federation(plugin.Plugin):
 
         return None
 
-    async def cmd_unfban(
-        self, ctx: command.Context, target: Union[User, Chat, None] = None
-    ) -> str:
+    async def _propagate_unfban(
+        self,
+        target: Union[User, Chat],
+        chats: List[int],
+        host_fed: str,
+        sub_fed: Optional[str] = None,
+    ) -> None:
+        for chat in chats:
+            try:
+                await self.bot.client.unban_chat_member(chat, target.id)
+                await asyncio.sleep(0.5)
+            except (BadRequest, Forbidden, ChannelPrivate) as err:
+                self.log.warning(
+                    f"Failed to unfban on subfed {sub_fed} of {host_fed} due to {err.MESSAGE}"
+                    if sub_fed
+                    else f"Failed to unfban on {host_fed} due to {err.MESSAGE}"
+                )
+
+    async def cmd_unfban(self, ctx: command.Context, target: Union[User, Chat, None] = None) -> str:
         """Unban a user on federation"""
         chat = ctx.chat
         if chat.type == ChatType.PRIVATE:
@@ -743,19 +861,26 @@ class Federation(plugin.Plugin):
         else:
             return ""
 
-        for chat in data["chats"]:
-            try:
-                await self.bot.client.unban_chat_member(chat, target.id)
-            except (BadRequest, Forbidden):
-                pass
+        await ctx.respond(f"Removing federation ban for {target.id} in federation {data['name']}")
+        await self._propagate_unfban(target, data["chats"], data["_id"])
+
+        if data.get("subscribers", []):
+            for fed_id in data["subscribers"]:
+                subs_data = await self.get_fed(fed_id)
+                if not subs_data:
+                    continue
+
+                await self._propagate_unfban(
+                    target, subs_data.get("chats", []), data["_id"], subs_data["_id"]
+                )
 
         if log := data.get("log"):
             await self.bot.client.send_message(log, text, disable_web_page_preview=True)
 
         return text
 
-    @command.filters(aliases=["fstats"])
-    async def cmd_fedstats(self, ctx: command.Context) -> str:
+    @command.filters(aliases=["fstats", "fedstats"])
+    async def cmd_fbanstats(self, ctx: command.Context) -> str:
         """Get user status"""
         chat = ctx.chat
         if len(ctx.args) > 1:  # <user_id> <fed_id>
@@ -791,48 +916,46 @@ class Federation(plugin.Plugin):
                         res["reason"],
                         res["time"].strftime("%Y %b %d %H:%M UTC"),
                     )
-
                 return await self.text(chat.id, "fed-stat-not-banned")
-
             return await self.text(chat.id, "fed-not-found")
 
-        reply_msg = ctx.msg.reply_to_message
+        user = None
+        user_id = None
         if len(ctx.args) == 1:  # <user_id>
+            try:
+                user_id = int(ctx.args[0])
+                user = await self.bot.client.get_users(user_id)
+                if isinstance(user, List):
+                    user = user[0]
+                if not user:
+                    return await self.text(chat.id, "fed-invalid-user-id")
+            except TypeError:
+                return await self.text(chat.id, "fed-invalid-user-id")
 
-            user_id = int(ctx.args[0])
-            cursor, is_channel = await self.check_fban(user_id)
-            if not cursor:
-                return await self.text(chat.id, "fed-stat-multi-not-banned")
-
-            text = await self.text(chat.id, "fed-stat-multi")
-            async for bans in cursor:
-                text += "\n" + await self.text(
-                    chat.id,
-                    "fed-stat-multi-info",
-                    bans["name"],
-                    bans["_id"],
-                    bans["banned_chat" if is_channel else "banned"][str(user_id)]["reason"],
-                )
-            return text
-
-        if reply_msg:
-            user = reply_msg.from_user or reply_msg.sender_chat
-        else:
-            user = ctx.msg.from_user
+        reply_msg = ctx.msg.reply_to_message
+        if not user_id:
+            if reply_msg:
+                user = reply_msg.from_user or reply_msg.sender_chat
+            else:
+                user = ctx.msg.from_user
+            user_id = user.id
 
         if not user:
             return ""
 
-        cursor, is_channel = await self.check_fban(user.id)
-        if cursor:
+        cursor = await self.check_fban(user_id)
+        fed_list = await cursor.to_list()
+        if fed_list:
             text = await self.text(chat.id, "fed-stat-multi")
-            async for bans in cursor:
+            for bans in fed_list:
                 text += "\n" + await self.text(
                     chat.id,
                     "fed-stat-multi-info",
                     bans["name"],
                     bans["_id"],
-                    bans["banned_chat" if is_channel else "banned"][str(user.id)]["reason"],
+                    bans["banned_chat" if bans.get("banned_chat") else "banned"][str(user.id)][
+                        "reason"
+                    ],
                 )
         else:
             text = await self.text(chat.id, "fed-stat-multi-not-banned")
@@ -914,7 +1037,7 @@ class Federation(plugin.Plugin):
                 + f"\n- `{data['_id']}`: {data['name']}"
             )
 
-        cursor = self.db.find({"admins": user.id})
+        cursor = self.db.find({"admins": user.id}, {"_id": 1, "name": 1})
         fed_list = await cursor.to_list()
         if fed_list:
             text = await self.text(chat.id, "fed-myfeds-admin") + "\n"
@@ -926,6 +1049,7 @@ class Federation(plugin.Plugin):
         return await self.text(chat.id, "fed-myfeds-no-admin")
 
     def generate_log_btn(self, data: Mapping[str, Any]) -> InlineKeyboardMarkup:
+        """Generate log channel verify button"""
         return InlineKeyboardMarkup(
             [
                 [
@@ -952,6 +1076,7 @@ class Federation(plugin.Plugin):
         )
 
     async def cmd_setfedlog(self, ctx: command.Context, fid: Optional[str] = None) -> Optional[str]:
+        """Set a federation log channel"""
         chat = ctx.chat
         if chat.type == ChatType.CHANNEL:
             if not fid:
@@ -990,6 +1115,7 @@ class Federation(plugin.Plugin):
         return await self.text(chat.id, "err-chat-groups")
 
     async def cmd_unsetfedlog(self, ctx: command.Context) -> str:
+        """Unset the federation log channel"""
         chat = ctx.chat
         user = ctx.msg.from_user
         if chat.type == ChatType.PRIVATE:
@@ -1004,3 +1130,62 @@ class Federation(plugin.Plugin):
             return ret
 
         return await self.text(chat.id, "err-chat-private")
+
+    async def _subfed_perm_check(self, ctx: command.Context, fid: Optional[str] = None):
+        """Check if able to subscribe to a fed and returns current and target federation"""
+        if not fid:
+            await ctx.respond(await self.text(ctx.chat.id, "fed-not-found"))
+            return None
+        if ctx.chat.type == ChatType.PRIVATE:
+            await ctx.respond(await self.text(ctx.chat.id, "err-chat-groups"))
+            return None
+
+        curr_fed = await self.get_fed_bychat(ctx.chat.id)
+        target = await self.get_fed(fid)
+        if not curr_fed:
+            await ctx.respond(await self.text(ctx.chat.id, "fed-no-fed-chat"))
+            return None
+        if curr_fed["owner"] != ctx.author.id:
+            await ctx.respond(await self.text(ctx.chat.id, "fed-owner-cmd"))
+            return None
+        if not target:
+            await ctx.respond(await self.text(ctx.chat.id, "fed-not-found"))
+            return None
+
+        return (curr_fed, target)
+
+    async def cmd_subfed(self, ctx: command.Context, fid: Optional[str] = None):
+        """Subscribe to a federation"""
+        res = await self._subfed_perm_check(ctx, fid)
+        if not res:
+            return
+        curr_fed, to_subs = res
+
+        await self.db.update_one({"_id": fid}, {"$push": {"subscribers": curr_fed["_id"]}})
+        try:
+            await self.bot.client.send_message(
+                to_subs["log"] or to_subs["owner"],
+                f"Federation {curr_fed['name']} has subscribed to {to_subs['name']}",
+            )
+        except PeerIdInvalid:
+            self.log.warning("Failed to send fed-subs message to log channel")
+
+        return await self.text(ctx.chat.id, "fed-subs-join", curr_fed["name"], to_subs["name"])
+
+    async def cmd_unsubfed(self, ctx: command.Context, fid: Optional[str] = None):
+        """Unsubscribe from a federation"""
+        res = await self._subfed_perm_check(ctx, fid)
+        if not res:
+            return
+        curr_fed, to_unsubs = res
+
+        await self.db.update_one({"_id": fid}, {"$pull": {"subscribers": curr_fed["_id"]}})
+        try:
+            await self.bot.client.send_message(
+                to_unsubs["log"],
+                f"Federation **{curr_fed['name']}** has unsubscribed from **{to_unsubs['name']}**",
+            )
+        except PeerIdInvalid:
+            self.log.warning("Failed to send unsubs message to log channel")
+
+        return await self.text(ctx.chat.id, "fed-subs-leave", curr_fed["name"], to_unsubs["name"])

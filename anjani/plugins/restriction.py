@@ -1,5 +1,5 @@
 """ Restriction Plugin. """
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,18 +15,17 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import asyncio
-import time
-from datetime import datetime
 from typing import Any, ClassVar, MutableMapping, Optional, Union
 
 from bson.objectid import ObjectId
 from pyrogram.enums.chat_member_status import ChatMemberStatus
-from pyrogram.errors import PeerIdInvalid, UserNotParticipant
+from pyrogram.errors import BadRequest, PeerIdInvalid, UserNotParticipant
 from pyrogram.types import (
     CallbackQuery,
     Chat,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    Message,
     User,
 )
 
@@ -42,8 +41,19 @@ class Restrictions(plugin.Plugin):
     async def on_load(self) -> None:
         self.db = self.bot.db.get_collection("CHATS")
 
+    async def on_chat_migrate(self, message: Message) -> None:
+        new_chat = message.chat.id
+        old_chat = message.migrate_from_chat_id
+
+        await self.db.update_one(
+            {"chat_id": old_chat},
+            {"$set": {"chat_id": new_chat}},
+        )
+
     async def on_plugin_backup(self, chat_id: int) -> MutableMapping[str, Any]:
-        data = await self.db.find_one({"chat_id": chat_id}, {"_id": False})
+        data = await self.db.find_one(
+            {"chat_id": chat_id, "warn_list": {"$exists": True}}, {"_id": 0, "warn_list": 1}
+        )
         try:
             return {self.name: data["warn_list"]} if data else {}
         except KeyError:
@@ -60,11 +70,20 @@ class Restrictions(plugin.Plugin):
         chat = query.message.chat
         user = query.matches[0].group(1)
         uid = query.matches[0].group(2)
-        invoker = await chat.get_member(query.from_user.id)
+
+        try:
+            invoker = await chat.get_member(query.from_user.id)
+        except UserNotParticipant:
+            return await query.answer(
+                await self.get_text(chat.id, "error-no-rights"), show_alert=True
+            )
+
         if not invoker.privileges or not invoker.privileges.can_restrict_members:
             return await query.answer(await self.get_text(chat.id, "warn-keyboard-not-admins"))
 
-        chat_data = await self.db.find_one({"chat_id": chat.id})
+        chat_data = await self.db.find_one(
+            {"chat_id": chat.id, "warn_list": {"$exists": True}}, {"warn_list": 1}
+        )
         if not chat_data:
             return
 
@@ -124,22 +143,29 @@ class Restrictions(plugin.Plugin):
             if util.tg.is_staff(target.id):
                 return await self.text(chat.id, "admin-kick")
 
-        await self.bot.client.ban_chat_member(
-            chat.id, target.id, until_date=datetime.fromtimestamp(int(time.time() + 30))
-        )
+        await self.bot.client.ban_chat_member(chat.id, target.id)
+
+        async def unban():
+            await asyncio.sleep(5)
+            await self.bot.client.unban_chat_member(chat.id, target.id)
+
+        asyncio.create_task(unban())
 
         ret = await self.text(
             chat.id, "kick-done", target.first_name if isinstance(target, User) else target.title
         )
         if reason:
             ret += await self.text(chat.id, "kick-reason", reason)
+
         return ret
 
-    @command.filters(filters.can_restrict)
-    async def cmd_ban(
-        self, ctx: command.Context, target: Union[User, Chat, None] = None, *, reason: str = ""
-    ) -> str:
-        """Ban chat member"""
+    async def _ban(
+        self,
+        ctx: command.Context,
+        target: Union[User, Chat, None] = None,
+        reason: str = "",
+        silent: bool = False,
+    ) -> Optional[str]:
         chat = ctx.chat
         reply_msg = ctx.msg.reply_to_message
 
@@ -157,7 +183,7 @@ class Restrictions(plugin.Plugin):
             if isinstance(target, User) and util.tg.is_staff_or_admin(
                 await chat.get_member(target.id)
             ):
-                return await self.text(chat.id, "admin-kick")
+                return await self.text(chat.id, "admin-ban")
         except UserNotParticipant:
             # Not a participant in the chat (replying from channel discussion)
             if util.tg.is_staff(target.id):
@@ -172,7 +198,27 @@ class Restrictions(plugin.Plugin):
         if reason:
             ret += await self.text(chat.id, "ban-reason", reason)
 
+        return ret if not silent else None
+
+    @command.filters(filters.can_restrict)
+    async def cmd_ban(
+        self, ctx: command.Context, target: Union[User, Chat, None] = None, *, reason: str = ""
+    ) -> str:
+        """Ban chat member"""
+        ret = await self._ban(ctx, target, reason)
+        if not ret:
+            raise ValueError
+
         return ret
+
+    @command.filters(filters.can_restrict)
+    async def cmd_sban(self, ctx: command.Context, target: Union[User, Chat, None] = None) -> None:
+        """Silently ban chat member"""
+        ret = await self._ban(ctx, target, silent=True)
+        if ret:
+            await ctx.respond(ret, delete_after=1)
+
+        await ctx.msg.delete()
 
     @command.filters(filters.can_restrict)
     async def cmd_unban(self, ctx: command.Context, user: Union[User, Chat, None] = None) -> str:
@@ -190,8 +236,14 @@ class Restrictions(plugin.Plugin):
 
         try:
             await chat.unban_member(user.id)
-        except PeerIdInvalid:
-            return await self.text(chat.id, "err-peer-invalid")
+        except (BadRequest, PeerIdInvalid) as e:
+            if isinstance(e.value, str) and "PARTICIPANT_ID_INVALID" in e.value:
+                return await self.text(chat.id, "err-invalid-pid")
+
+            if isinstance(e, PeerIdInvalid):
+                return await self.text(chat.id, "err-peer-invalid")
+
+            raise e from BadRequest
 
         return await self.text(
             chat.id, "unban-done", user.first_name if isinstance(user, User) else user.title
@@ -223,7 +275,10 @@ class Restrictions(plugin.Plugin):
 
         threshold = 3
         warns: Optional[int] = None
-        chat_data = await self.db.find_one({"chat_id": chat.id})
+        chat_data = await self.db.find_one(
+            {"chat_id": chat.id, "warn_list": {"$exists": True}},
+            {"warn_list": 1, "warn_threshold": 1},
+        )
         if chat_data:  # Get threshold and existing warns from chat data
             threshold = chat_data.get("warn_threshold", 3)
             try:
@@ -280,7 +335,10 @@ class Restrictions(plugin.Plugin):
         if target.status in {ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER}:
             return await ctx.get_text("rmwarn-admin")
 
-        chat_data = await self.db.find_one({"chat_id": chat.id})
+        chat_data = await self.db.find_one(
+            {"chat_id": chat.id, "warn_list": {"$exists": True}},
+            {"warn_list": 1, "warn_threshold": 1},
+        )
         if not chat_data:
             return await ctx.get_text("warn-no-data", user.mention)
         threshold = chat_data.get("warn_threshold", 3)
@@ -344,7 +402,9 @@ class Restrictions(plugin.Plugin):
         if target.status in {ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER}:
             return await ctx.get_text("rmwarn-admin")
 
-        chat_data = await self.db.find_one({"chat_id": chat.id})
+        chat_data = await self.db.find_one(
+            {"chat_id": chat.id, "warn_list": {"$exists": True}}, {"warn_list": 1}
+        )
         if not chat_data:
             return await ctx.get_text("warn-no-data", user.mention)
 

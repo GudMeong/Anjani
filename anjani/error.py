@@ -1,5 +1,5 @@
 """Anjani Errors Constructor"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -74,10 +74,7 @@ class ConversionError(BadArgument):
     """
 
     def __init__(  # skipcq: PYL-W1113
-        self,
-        converter: Optional["Converter"] = None,
-        err: Optional[Exception] = None,
-        *args: Any
+        self, converter: Optional["Converter"] = None, err: Optional[Exception] = None, *args: Any
     ) -> None:
         if converter and err:
             self.converter = type(converter).__name__

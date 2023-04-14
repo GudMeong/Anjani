@@ -1,5 +1,5 @@
 """miscellaneous bot commands"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,7 +14,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import re
 from json import JSONDecodeError
 from typing import Any, ClassVar, Optional
 
@@ -25,21 +24,16 @@ from anjani import command, filters, plugin
 
 
 class Paste:
-
-    __token: Optional[str]
-
     def __init__(self, session: ClientSession, name: str, url: str):
         self.__session = session
         self.__name = name
         self.__url = url
 
-        self.__token = None
         self.url_map = {
-            "-h": "https://www.toptal.com/developers/hastebin/",
-            "-k": "https://katb.in/",
-            "-s": "https://spaceb.in/",
-            "hastebin": "https://www.toptal.com/developers/hastebin/",
-            "katbin": "https://katb.in/",
+            "-h": "https://hastebin.com/",
+            "-s": "https://stashbin.xyz/",
+            "hastebin": "https://hastebin.com/",
+            "stashbin": "https://stashbin.xyz/",
             "spacebin": "https://spaceb.in/",
         }
 
@@ -50,34 +44,16 @@ class Paste:
         ...
 
     async def go(self, content: Any) -> str:
-        if self.__name == "katbin":
-            regex = re.compile(r'name="_csrf_token".+value="(.+)"')
-            async with self.__session.get(self.__url) as r:
-                if r.status == 200:
-                    async for data in r.content.iter_any():
-                        token = regex.search(data.decode("utf-8"))
-                        if not token:
-                            continue
-
-                        self.__token = token.group(1)
-                        break
-
-            if self.__token:
-                content["_csrf_token"] = self.__token
-
         async with self.__session.post(self.__url, data=content) as r:
-            if self.__name == "katbin":
-                return str(r.url)
-
             content_data = await r.json()
             url = self.url_map[self.__name]
-            return (
-                url + content_data["key"]
-                if self.__name == "hastebin"
-                else url + content_data["payload"]["id"]
-            )
-
-        raise ValueError("Failed to paste content.")
+            if self.__name == "stashbin":
+                slug = content_data["data"]["key"]
+            elif self.__name == "hastebin":
+                slug = content_data["key"]
+            else:
+                slug = content_data["payload"]["id"]
+            return url + slug
 
 
 class Misc(plugin.Plugin):
@@ -112,7 +88,7 @@ class Misc(plugin.Plugin):
             return None
 
         if not service:
-            service = "spacebin"
+            service = "stashbin"
 
         chat = ctx.chat
         reply_msg = ctx.msg.reply_to_message
@@ -128,11 +104,10 @@ class Misc(plugin.Plugin):
             return None
 
         uris = {
-            "-h": "https://www.toptal.com/developers/hastebin/documents",
-            "-k": "https://katb.in/",
-            "-s": "https://spaceb.in/api/v1/documents/",
-            "hastebin": "https://www.toptal.com/developers/hastebin/documents",
-            "katbin": "https://katb.in/",
+            "-h": "https://hastebin.com/documents",
+            "-s": "http://stashbin.xyz/api/document",
+            "hastebin": "https://hastebin.com/documents",
+            "stashbin": "http://stashbin.xyz/api/document",
             "spacebin": "https://spaceb.in/api/v1/documents/",
         }
         try:
@@ -143,10 +118,10 @@ class Misc(plugin.Plugin):
         if service in {"-h", "hastebin"}:
             service = "hastebin"
             data = data.encode("utf-8")
-        elif service in {"-k", "katbin"}:
-            service = "katbin"
-            data = {"paste[content]": data}
-        elif service in {"-s", "spacebin"}:
+        elif service in {"-s", "stashbin"}:
+            service = "stashbin"
+            data = {"content": data}
+        elif service == "spacebin":
             service = "spacebin"
             data = {"content": data, "extension": "txt"}
         else:
@@ -160,6 +135,7 @@ class Misc(plugin.Plugin):
                     ctx.chat.id, "paste-succes", f"[{service}]({await paste.go(data)})"
                 )
         except (JSONDecodeError, ContentTypeError, ClientConnectorError, KeyError):
+            self.log.error("Error while pasting", exc_info=True)
             return await self.text(ctx.chat.id, "paste-fail", service)
 
     @command.filters(filters.private)
@@ -179,14 +155,13 @@ class Misc(plugin.Plugin):
         async with self.bot.http.get("https://www.nekos.life/api/v2/img/slap") as slap:
             if slap.status != 200:
                 return await self.text(chat.id, "err-api-down")
-
             res = await slap.json()
-            msg = ctx.msg.reply_to_message or ctx.msg
-            await self.bot.client.send_animation(
-                chat.id,
-                res["url"],
-                reply_to_message_id=msg.id,
-                caption=text,
-            )
 
+        msg = ctx.msg.reply_to_message or ctx.msg
+        await self.bot.client.send_animation(
+            chat.id,
+            res["url"],
+            reply_to_message_id=msg.id,
+            caption=text,
+        )
         return None

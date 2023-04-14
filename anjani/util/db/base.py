@@ -1,5 +1,5 @@
 """Anjani database core"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -67,11 +67,14 @@ class AsyncBase(Generic[_DocumentType]):
         if (
             isinstance(other, self.__class__)
             and hasattr(self, "dispatch")
-            and hasattr(self, "dispatch")
+            and hasattr(other, "dispatch")
         ):
             return self.dispatch == other.dispatch
 
         return NotImplemented
+
+    def __hash__(self):
+        return hash(self.dispatch)
 
     def __repr__(self) -> str:
         return type(self).__name__ + f"({self.dispatch!r})"

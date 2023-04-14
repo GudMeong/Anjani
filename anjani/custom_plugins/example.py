@@ -1,5 +1,5 @@
 """Anjani example-plugin"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -16,9 +16,14 @@
 
 import asyncio
 import io
+import sys
 from typing import IO, Any, ClassVar, MutableMapping
 
-from aiopath import PureAsyncPosixPath
+if sys.version_info >= (3, 10):
+    from aiopath import AsyncPurePosixPath as PosixPath
+else:
+    from aiopath import PureAsyncPosixPath as PosixPath
+
 from pyrogram.types import CallbackQuery, Message
 
 from anjani import command, filters, listener, plugin, util
@@ -108,7 +113,7 @@ class ExamplePlugin(plugin.Plugin):
         # unnamed file that doesn't render as media in clients.
         # We abuse aiopath to extract the filename section here for convenience, since URLs are *mostly* POSIX paths
         # with the exception of the protocol part, which we don't care about here.
-        cat_stream.name = PureAsyncPosixPath(cat_url).name
+        cat_stream.name = PosixPath(cat_url).name
 
         return cat_stream
 

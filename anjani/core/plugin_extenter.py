@@ -1,5 +1,5 @@
 """Anjani plugin extender"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -69,7 +69,9 @@ class PluginExtender(MixinBase):
             for sym in dir(plug):
                 cls = getattr(plug, sym)
                 if inspect.isclass(cls) and issubclass(cls, plugin.Plugin) and not cls.disabled:
-                    self.load_plugin(cls, comment=comment)
+                    name = cls.name.lower().replace(" ", "_")
+                    if not self.config.is_plugin_disabled(f"disable_{name}_plugin"):
+                        self.load_plugin(cls, comment=comment)
 
     # noinspection PyTypeChecker,PyTypeChecker
     def load_all_plugins(self: "Anjani") -> None:

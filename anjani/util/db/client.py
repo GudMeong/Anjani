@@ -1,5 +1,5 @@
 """Anjani database client"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -20,6 +20,7 @@ from typing import (
     AsyncGenerator,
     FrozenSet,
     List,
+    Literal,
     Mapping,
     Optional,
     Set,
@@ -47,7 +48,7 @@ from .change_stream import AsyncChangeStream
 from .client_session import AsyncClientSession
 from .command_cursor import AsyncCommandCursor, CommandCursor
 from .db import AsyncDatabase
-from .types import ReadPreferences
+from .typings import ReadPreferences
 
 
 class AsyncClient(AsyncBaseProperty):
@@ -158,9 +159,7 @@ class AsyncClient(AsyncBaseProperty):
         }
         return AsyncCommandCursor(CommandCursor(database["$cmd"], cursor, None))
 
-    async def server_info(
-        self, session: Optional[AsyncClientSession] = None
-    ) -> Mapping[str, Any]:
+    async def server_info(self, session: Optional[AsyncClientSession] = None) -> Mapping[str, Any]:
         return await util.run_sync(
             self.dispatch.server_info, session=session.dispatch if session else session
         )
@@ -189,15 +188,16 @@ class AsyncClient(AsyncBaseProperty):
         self,
         pipeline: Optional[List[Mapping[str, Any]]] = None,
         *,
-        full_document: Optional[str] = None,
-        resume_after: Optional[Any] = None,
+        full_document: Optional[Literal["updateLookup"]] = None,
+        resume_after: Optional[Mapping[str, str]] = None,
         max_await_time_ms: Optional[int] = None,
         batch_size: Optional[int] = None,
         collation: Optional[Collation] = None,
         start_at_operation_time: Optional[Timestamp] = None,
         session: Optional[AsyncClientSession] = None,
-        start_after: Optional[Any] = None,
-        comment: Optional[str] = None
+        start_after: Optional[Mapping[str, str]] = None,
+        comment: Optional[str] = None,
+        full_document_before_change: Optional[Literal["required", "whenAvailable"]] = None,
     ) -> AsyncChangeStream:
         return AsyncChangeStream(
             self,
@@ -210,7 +210,8 @@ class AsyncClient(AsyncBaseProperty):
             start_at_operation_time,
             session,
             start_after,
-            comment
+            comment,
+            full_document_before_change,
         )
 
     @property

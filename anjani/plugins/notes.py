@@ -1,5 +1,5 @@
 """Notes"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -77,7 +77,8 @@ class Notes(plugin.Plugin):
     async def on_plugin_restore(self, chat_id: int, data: MutableMapping[str, Any]) -> None:
         await self.db.update_one({"chat_id": chat_id}, {"$set": data[self.name]}, upsert=True)
 
-    @listener.filters(filters.regex(r"^#[\w\-]+(?!\n)$"))
+    @listener.priority(95)
+    @listener.filters(filters.regex(r"^#[\w\-]+(?!\n)$") & ~filters.outgoing)
     async def on_message(self, message: Message) -> None:
         """Notes hashtag trigger."""
         trigger = message.text or message.caption
@@ -88,15 +89,12 @@ class Notes(plugin.Plugin):
         chat = message.chat
         reply_to = message.reply_to_message.id if message.reply_to_message else message.id
 
-        data = await self.db.find_one({"chat_id": chat.id})
-        if not data or not data.get("notes"):
+        data = await self.db.find_one(
+            {"chat_id": chat.id, f"notes.{name}": {"$exists": True}}, {f"notes.{name}": 1}
+        )
+        if not data:
             return
-
-        note: MutableMapping[str, Any]
-        try:
-            note = data["notes"][name]
-        except KeyError:
-            return
+        note = data["notes"][name]
 
         button = note.get("button", None)
         if noformat:
@@ -177,7 +175,10 @@ class Notes(plugin.Plugin):
             )
             return
 
-        name = ctx.args[0]
+        trigger = ctx.args[0]
+        if trigger.startswith("#") or "." in trigger or "$" in trigger:
+            return await self.text(chat.id, "err-illegal-trigger")
+
         text, types, content, buttons = get_message_info(ctx.msg)
         _, ret = await asyncio.gather(
             self.db.update_one(
@@ -185,7 +186,7 @@ class Notes(plugin.Plugin):
                 {
                     "$set": {
                         "chat_name": chat.title,
-                        f"notes.{name}": {
+                        f"notes.{trigger}": {
                             "text": text,
                             "type": types,
                             "content": content,
@@ -195,7 +196,7 @@ class Notes(plugin.Plugin):
                 },
                 upsert=True,
             ),
-            self.text(chat.id, "note-saved", name),
+            self.text(chat.id, "note-saved", trigger),
         )
         return ret
 
@@ -208,8 +209,8 @@ class Notes(plugin.Plugin):
             return await self.text(chat.id, "no-notes")
 
         notes = await self.text(chat.id, "note-list", chat.title)
-        for key in data["notes"].keys():
-            notes += f"× `{key}`\n"
+        for key in sorted(data["notes"].keys()):
+            notes += f"`#{key}`\n"
         return notes
 
     @command.filters(filters.admin_only, aliases=["clear"])
@@ -221,8 +222,8 @@ class Notes(plugin.Plugin):
 
         name = ctx.input
 
-        data = await self.db.find_one({"chat_id": chat.id})
-        if not data or not data.get("notes"):
+        data = await self.db.find_one({"chat_id": chat.id, f"notes.{name}": {"$exists": True}})
+        if not data:
             return await self.text(chat.id, "no-notes")
 
         notes: MutableMapping[str, Any] = data["notes"]

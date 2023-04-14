@@ -1,13 +1,16 @@
 [tool.poetry]
 name = "anjani"
-version = "2.3.1"
+version = "2.11.1"
 description = "Telegram group management bot"
 license = "GPL-3.0-or-later"
-authors = ["UserbotIndo Team"]
+authors = [
+    "Gaung Ramadhan <hi@mrmiss.my.id>",
+    "Adek Maulana <adekzmaulana@gmail.com>"
+]
 readme = "README.md"
-homepage = "https://github.com/userbotindo/anjani#readme"
+homepage = "https://userbotindo.com/anjani"
 repository = "https://github.com/userbotindo/anjani"
-documentation = "https://github.com/userbotindo/Anjani/wiki"
+documentation = "https://userbotindo.com/anjani/docs/home"
 keywords = ["chatbot", "bot", "python", "telegram-bot", "pyrogram"]
 classifiers = [
     "Environment :: Console",
@@ -17,6 +20,8 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Communications",
     "Topic :: Communications :: Chat",
@@ -26,33 +31,40 @@ classifiers = [
 anjani = "anjani.main:start"
 
 [tool.poetry.dependencies]
-python = "^3.9, <3.10"
-PyYAML = "^6.0"
-aiohttp = "^3.8.1"
-aiorun = "^2022.4.1"
-colorlog = "^6.6.0"
-dnspython = "^2.2.1"
-Pyrogram = "^2.0.35"
-python-dotenv = "^0.20.0"
-TgCrypto = "^1.2.3"
-uvloop = {version ="^0.16.0", optional = true}
-aiopath = "<0.6"
-pymongo = "^4.2.0"
-scikit-learn = {version = "1.1.1", optional = true}
+python = "~=3.9"
+aiohttp = "^3.8.4"
+aiopath = [
+    {version = "^0.5.12", python = "<3.10"},
+    {version = "^0.6.11", python = ">=3.10"},
+]
+aiorun = "^2022.11.1"
+certifi = {version = "^2022.12.7", platform = "windows"}
+colorlog = "^6.7.0"
+frozenlist = "^1.3.3"
 meval = "^2.5"
-scipy = {version = "^1.8.1", optional = true}
-
-[tool.poetry.dev-dependencies]
-black = "^22.6"
-pre-commit = "^2.20.0"
-pylint = "^2.14.5"
-isort = "^5.10.1"
+multidict = "^6.0.4"
+pymongo = "^4.3.3"
+Pyrogram = "^2.0.99"
+python-dotenv = ">=0.21.1,<1.1.0"
+PyYAML = "^6.0"
+TgCrypto = "^1.2.5"
+typing-extensions = "^4.5.0"
+uvloop = {version = "^0.17.0", optional = true, platform = "linux"}
+yarl = "^1.8.2"
+aiocache = "^0.12.0"
 
 [tool.poetry.extras]
-all = ["scikit-learn", "uvloop", "scipy"]
-ml = ["scikit-learn", "scipy"]
+all = ["uvloop"]
 uvloop = ["uvloop"]
 
+[tool.poetry.group.dev.dependencies]
+black = ">=22.12,<24.0"
+isort = "^5.12.0"
+pre-commit = ">=2.21,<4.0"
+pylint = "^2.16.2"
+flake8 = ">=5.0.4,<7.0.0"
+pytest = "^7.2.1"
+pytest-asyncio = ">=0.20.2,<0.22.0"
 
 #
 # Black config
@@ -66,18 +78,31 @@ target-version = ["py38"]
 #
 [tool.isort]
 profile = "black"
-known_third_party = ["aiohttp", "aiopath", "aiorun", "colorlog", "dotenv", "pymongo", "pyrogram", "yaml"]
+known_third_party = [
+    "aiohttp",
+    "aiopath",
+    "aiorun",
+    "colorlog",
+    "dotenv",
+    "pymongo",
+    "pyrogram",
+    "scikit-learn",
+    "yaml"
+]
 
 #
 # Pylint Config
 #
 [tool.pylint]
+    ignore = "anjani/util/db"
+
     [tool.pylint.messages_control]
     disable = [
         "attribute-defined-outside-init",
         "too-few-public-methods",
         "missing-class-docstring",
         "logging-fstring-interpolation",
+        "missing-function-docstring"
     ]
 
     [tool.pylint.reports]
@@ -92,6 +117,9 @@ known_third_party = ["aiohttp", "aiopath", "aiorun", "colorlog", "dotenv", "pymo
     [tool.pylint.design]
     max-args = 15
 
+# Semantic Release Config
+[tool.semantic_release]
+version_variable = "anjani/__init__.py:__version__"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

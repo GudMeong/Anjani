@@ -1,5 +1,5 @@
 """Anjani base telegram"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,6 +22,7 @@ from hashlib import sha256
 from typing import TYPE_CHECKING, Any, MutableMapping, Optional, Set, Tuple, Type, Union
 
 import pyrogram.filters as flt
+from aiocache import cached
 from aiopath import AsyncPath
 from pyrogram.client import Client
 from pyrogram.enums.parse_mode import ParseMode
@@ -30,11 +31,19 @@ from pyrogram.handlers.callback_query_handler import CallbackQueryHandler
 from pyrogram.handlers.chat_member_updated_handler import ChatMemberUpdatedHandler
 from pyrogram.handlers.inline_query_handler import InlineQueryHandler
 from pyrogram.handlers.message_handler import MessageHandler
-from pyrogram.types import CallbackQuery, InlineQuery, Message, User
+from pyrogram.types import (
+    CallbackQuery,
+    Chat,
+    ChatMember,
+    ChatPreview,
+    InlineQuery,
+    Message,
+    User,
+)
 from yaml import full_load
 
 from anjani import util
-from anjani.language import getLangFile
+from anjani.language import get_lang_file
 
 from .anjani_mixin_base import MixinBase
 
@@ -105,6 +114,7 @@ class TelegramBot(MixinBase):
             api_hash=api_hash,
             bot_token=bot_token,
             workdir="anjani",
+            workers=int(self.config.get("workers", Client.WORKERS)),
             parse_mode=ParseMode.MARKDOWN,
         )
 
@@ -155,11 +165,11 @@ class TelegramBot(MixinBase):
         util.tg.STAFF.update(self.staff)
 
         # Update Language setting chat from db
-        async for data in self.db.get_collection("LANGUAGE").find():
+        async for data in self.db.get_collection("LANGUAGE").find({}, {"_id": False}):
             self.chats_languages[data["chat_id"]] = data["language"]
 
         # Load text from language file
-        async for language_file in getLangFile():
+        async for language_file in get_lang_file():
             self.languages[language_file.stem] = await util.run_sync(
                 full_load, await language_file.read_text()
             )
@@ -186,29 +196,47 @@ class TelegramBot(MixinBase):
             for v, k in signal.__dict__.items()
             if v.startswith("SIG") and not v.startswith("SIG_")
         }
+        task: asyncio.Task
 
         if sys.platform == "win32":
 
-            def signal_handler_windows(signum: int, _: Any) -> None:
+            def clear_handler() -> None:
+                for signame in (signal.SIGINT, signal.SIGBREAK, signal.SIGABRT):
+                    signal.signal(signame, signal.SIG_DFL)
+
+            def signal_handler_windows(signum: int, *args: Any) -> None:
                 print(flush=True)
                 self.log.info(f"Stop signal received ('{signals[signum]}').")
                 self.__running = False
+                clear_handler()
+                task.cancel()
 
-            for signame in (signal.SIGINT, signal.SIGTERM, signal.SIGABRT):
+            for signame in (signal.SIGINT, signal.SIGBREAK, signal.SIGABRT):
                 signal.signal(signame, signal_handler_windows)
         else:
+
+            def clear_handler() -> None:
+                for signame in (signal.SIGINT, signal.SIGTERM, signal.SIGABRT):
+                    self.loop.remove_signal_handler(signame)
 
             def signal_handler(signum: int) -> None:
                 print(flush=True)  # Separate signal and next log
                 self.log.info(f"Stop signal received ('{signals[signum]}').")
                 self.__running = False
+                clear_handler()
+                task.cancel()
 
             for signame in (signal.SIGINT, signal.SIGTERM, signal.SIGABRT):
                 self.loop.add_signal_handler(signame, partial(signal_handler, signame))
 
         self.__running = True
         while self.__running:
-            await asyncio.sleep(1)
+            task = self.loop.create_task(asyncio.sleep(150))
+
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     async def run(self: "Anjani") -> None:
         if self.__running:
@@ -220,6 +248,10 @@ class TelegramBot(MixinBase):
                 await self.start()
             except KeyboardInterrupt:
                 self.log.warning("Received interrupt while connecting")
+                return
+
+            if self.config.get("is_ci", False):
+                self.log.info("Completed CI run, exiting")
                 return
 
             # Request updates, then idle until disconnected
@@ -262,9 +294,11 @@ class TelegramBot(MixinBase):
         self.update_plugin_event(
             "chat_action", MessageHandler, filters=flt.new_chat_members | flt.left_chat_member
         )
-        self.update_plugin_event("chat_member_update", ChatMemberUpdatedHandler)
-        self.update_plugin_event("chat_migrate", MessageHandler, filters=flt.migrate_from_chat_id)
-        self.update_plugin_event("inline_query", InlineQueryHandler)
+        self.update_plugin_event("chat_member_update", ChatMemberUpdatedHandler, group=1)
+        self.update_plugin_event(
+            "chat_migrate", MessageHandler, filters=flt.migrate_from_chat_id, group=1
+        )
+        self.update_plugin_event("inline_query", InlineQueryHandler, group=1)
         self.update_plugin_event(
             "message",
             MessageHandler,
@@ -272,6 +306,7 @@ class TelegramBot(MixinBase):
             & ~flt.left_chat_member
             & ~flt.migrate_from_chat_id
             & ~flt.migrate_to_chat_id,
+            group=-1,
         )
 
     @property
@@ -348,3 +383,13 @@ class TelegramBot(MixinBase):
             return await response.edit(text, **kwargs)
 
         raise ValueError(f"Unknown response mode {mode}")
+
+    @cached(ttl=60)
+    async def get_chat(self: "Anjani", chat_id: int) -> Union[Chat, ChatPreview]:
+        """Wrapper for `Client.get_chat` with a TTL cache."""
+        return await self.client.get_chat(chat_id)
+
+    @cached(ttl=60)
+    async def get_chat_member(self: "Anjani", chat_id: int, user_id: int) -> ChatMember:
+        """Wrapper for `Client.get_chat_member` with a TTL cache."""
+        return await self.client.get_chat_member(chat_id, user_id)

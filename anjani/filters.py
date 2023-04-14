@@ -1,5 +1,5 @@
 """Anjani filters"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from typing import Any, Callable, Coroutine, Optional
+from typing import TYPE_CHECKING, Any, Callable, Coroutine, Optional
 
 from pyrogram.client import Client
 from pyrogram.enums.chat_member_status import ChatMemberStatus
@@ -76,10 +76,14 @@ from pyrogram.filters import (  # skipcq: PY-W2000
     video_note,
     web_page,
 )
-from pyrogram.types import Message
+from pyrogram.types import ChatMember, Message
 
 from anjani.util.tg import fetch_permissions, get_text, reply_and_delete
 from anjani.util.types import CustomFilter
+
+if TYPE_CHECKING:
+    from anjani.core import Anjani
+
 
 FilterFunc = Callable[[CustomFilter, Client, Message], Coroutine[Any, Any, bool]]
 __all__ = [
@@ -165,7 +169,7 @@ def _create_filter_permission(name: str, *, include_bot: bool = True) -> Filter:
             return False
 
         bot_perm, member_perm = await fetch_permissions(client, message.chat.id, target.id)
-        if not bot_perm.privileges or not member_perm.privileges:
+        if not (bot_perm and member_perm) or not (bot_perm.privileges and member_perm.privileges):
             return False
 
         try:
@@ -235,39 +239,62 @@ owner_only = _owner_only()
 
 
 # { admin_only
+async def _send_error(robot: "Anjani", chat_id: int, message: Message, string_key: str) -> None:
+    robot.loop.create_task(reply_and_delete(message, await get_text(robot, chat_id, string_key), 5))
+
+
+def is_admin(target: ChatMember) -> bool:
+    return target.status in {ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER}
+
+
 def _admin_only(include_bot: bool = True, send_error: bool = True) -> CustomFilter:
     async def func(flt: CustomFilter, client: Client, message: Message) -> bool:
         target, priv = message.from_user, message.chat and message.chat.type == ChatType.PRIVATE
-        if priv or not message.chat or not target:
+        if priv or not message.chat:
             return False
 
-        if message.sender_chat:
-            if message.sender_chat.id == message.chat.id:  # Anonymous Admin
-                return True
+        if not target:
+            if message.sender_chat:
+                if message.sender_chat.id == message.chat.id:  # Anonymous Admin
+                    return True
 
-            curr_chat: Any = await client.get_chat(message.chat.id)
-            if (
-                curr_chat.linked_chat
-                and message.sender_chat.id == curr_chat.linked_chat.id
-                and not message.forward_from_chat
-            ):  # Linked Channel Owner
-                return True
+                curr_chat: Any = await client.get_chat(message.chat.id)
+                if (
+                    curr_chat.linked_chat
+                    and message.sender_chat.id == curr_chat.linked_chat.id
+                    and not message.forward_from_chat
+                ):  # Linked Channel Owner
+                    return True
 
             return False
 
         bot_perm, member_perm = await fetch_permissions(client, message.chat.id, target.id)
-        if bot_perm.status == ChatMemberStatus.ADMINISTRATOR and member_perm.status in {
-            ChatMemberStatus.ADMINISTRATOR,
-            ChatMemberStatus.OWNER,
-        }:
+        if not bot_perm:
+            if send_error:
+                await _send_error(flt.anjani, message.chat.id, message, "err-im-not-admin")
+
+            return False
+
+        if not member_perm:
+            if send_error:
+                await _send_error(flt.anjani, message.chat.id, message, "err-not-admin")
+
+            return False
+
+        user_admin = is_admin(member_perm)
+        bot_admin = is_admin(bot_perm)
+        if bot_admin and user_admin:
             return True
 
         if send_error:
-            flt.anjani.loop.create_task(
-                reply_and_delete(
-                    message, await get_text(flt.anjani, message.chat.id, "err-not-admin"), 5
-                )
-            )
+            if not bot_admin and user_admin:
+                # Bot is not admin, but user is
+                await _send_error(flt.anjani, message.chat.id, message, "err-im-not-admin")
+            elif bot_admin and not user_admin:
+                # Bot is admin, but user is not
+                await _send_error(flt.anjani, message.chat.id, message, "err-not-admin")
+            else:
+                await _send_error(flt.anjani, message.chat.id, message, "err-perm")
 
         return False
 

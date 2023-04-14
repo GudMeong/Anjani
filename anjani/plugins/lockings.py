@@ -1,5 +1,5 @@
 """Lock/Unlock group Plugin"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,12 +30,50 @@ from typing import (
     Union,
 )
 
+from pyrogram.client import Client
 from pyrogram.enums.chat_member_status import ChatMemberStatus
+from pyrogram.enums.chat_type import ChatType
 from pyrogram.enums.message_entity_type import MessageEntityType
-from pyrogram.errors import MessageDeleteForbidden, MessageIdInvalid, UserNotParticipant
-from pyrogram.types import ChatPermissions, Message
+from pyrogram.errors import (
+    ChannelPrivate,
+    ChatAdminRequired,
+    MessageDeleteForbidden,
+    MessageIdInvalid,
+    PeerIdInvalid,
+    UserNotParticipant,
+)
+from pyrogram.types import Chat, ChatPermissions, Message
 
-from anjani import command, filters, listener, plugin, util
+from anjani import command, filters, plugin, util
+
+
+async def anon(_: Client, message: Message) -> bool:
+    return bool(message.sender_chat)
+
+
+async def button(_: Client, message: Message) -> bool:
+    return bool(message.reply_markup)
+
+
+async def rtl(_: Client, message: Message) -> bool:
+    text = message.text or message.caption
+    if not text:
+        return False
+
+    checkers = await Lockings.detect_alphabet(text)
+    return "arabic" in checkers or "hebrew" in checkers
+
+
+async def url(_: Client, message: Message) -> bool:
+    if not message.entities:
+        return False
+
+    for entity in message.entities:
+        if entity.type == MessageEntityType.URL:
+            return True
+
+    return False
+
 
 LOCK_TYPES = OrderedDict(
     sorted(
@@ -51,14 +89,13 @@ LOCK_TYPES = OrderedDict(
             "location": filters.location,
             "venue": filters.venue,
             "game": filters.game,
-            "poll": filters.poll,
             "dice": filters.dice,
-            "button": "button",
+            "button": button,
             "inline": filters.via_bot,
-            "url": "url",
+            "url": url,
             "bots": "bots",
-            "rtl": "rtl",
-            "anon": "anon",
+            "rtl": rtl,
+            "anon": anon,
         }.items()
     )
 )
@@ -88,60 +125,60 @@ class Lockings(plugin.Plugin):
         )
 
     async def on_plugin_backup(self, chat_id: int) -> MutableMapping[str, Any]:
-        language = await self.db.find_one({"chat_id": chat_id}, {"_id": False})
-        return {self.name: language} if language else {}
+        data = await self.db.find_one({"chat_id": chat_id}, {"_id": False})
+        return {self.name: data} if data else {}
 
     async def on_plugin_restore(self, chat_id: int, data: MutableMapping[str, Any]) -> None:
         await self.db.update_one({"chat_id": chat_id}, {"$set": data[self.name]}, upsert=True)
 
-    # skipcq: PYL-E1130
-    @listener.filters(~filters.admin_only_no_report & filters.group)
     async def on_message(self, message: Message) -> None:
+        if message.outgoing:
+            return
+
         chat = message.chat
+        user = message.from_user
+        if not chat or chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
+            return
+
+        if not user and message.sender_chat:
+            if message.sender_chat.id == chat.id:  # anon admin
+                return
+
+            current_chat: Chat = await self.bot.get_chat(chat.id)
+            if current_chat.linked_chat and message.sender_chat.id == current_chat.linked_chat.id:
+                # Linked channel group
+                return
+
+        if user:
+            try:
+                target = await chat.get_member(user.id)
+            except (ChatAdminRequired, ChannelPrivate, PeerIdInvalid, UserNotParticipant):
+                pass
+            else:
+                if target.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+                    return
+
         locked = await self.get_chat_restrictions(chat.id)
         for lock_type in locked:
             try:
-                func: Union[str, Callable[..., Coroutine[Any, Any, bool]]] = LOCK_TYPES[lock_type]
-                if callable(func):
-                    if await func(self.bot.client, message):
-                        await message.delete()
-                else:
-                    if lock_type == "bots":
-                        continue  # bots are handled in on_chat_action
+                func: Union[
+                    str, Callable[[Client, Message], Coroutine[Any, Any, bool]]
+                ] = LOCK_TYPES[lock_type]
+                if not callable(func):
+                    continue
 
-                    if lock_type == "anon" and message.sender_chat:
-                        current_chat: Any = await self.bot.client.get_chat(chat.id)
-                        if not (
-                            current_chat.linked_chat
-                            and message.sender_chat.id == current_chat.linked_chat.id
-                            and not message.forward_from_chat
-                        ):
-                            await message.delete()
-
-                    if lock_type == "button" and message.reply_markup:
-                        await message.delete()
-
-                    text = message.text or message.caption
-                    if lock_type == "rtl" and text:
-                        checkers = await self.detect_alphabet(text)
-                        if "arabic" in checkers:
-                            await message.delete()
-
-                    if lock_type == "url" and message.entities:
-                        for entity in message.entities:
-                            if entity.type == MessageEntityType.URL:
-                                await message.delete()
-                                break
+                if await func(self.bot.client, message):
+                    await message.delete()
             except MessageDeleteForbidden:
                 await self.bot.respond(
                     message,
                     await self.get_text(chat.id, "lockings-failed-to-delete", lock_type=lock_type),
                     quote=True,
                 )
-            except MessageIdInvalid:  # Probably deleted already
+            except MessageIdInvalid:
                 continue
             except Exception as e:  # skipcq: PYL-W0703
-                self.log.error(e)
+                self.log.error(e, exc_info=e)
                 continue
 
     async def on_chat_action(self, action: Message) -> None:
@@ -157,7 +194,7 @@ class Lockings(plugin.Plugin):
         bot_perm, added_by_perm = await util.tg.fetch_permissions(
             self.bot.client, chat.id, added_by.id
         )
-        if added_by_perm.status == ChatMemberStatus.OWNER:
+        if not (bot_perm and added_by_perm) or added_by_perm.status == ChatMemberStatus.OWNER:
             return  # bot added by owner
 
         # Kick the bot if it's not added by the owner
@@ -202,8 +239,6 @@ class Lockings(plugin.Plugin):
                     },
                     "messages": {"can_send_messages": self.get_mode(mode)},
                     "media": {"can_send_media_messages": self.get_mode(mode)},
-                    "sticker": {"can_send_other_messages": self.get_mode(mode)},
-                    "gif": {"can_send_other_messages": self.get_mode(mode)},
                     "polls": {"can_send_polls": self.get_mode(mode)},
                     "other": {"can_send_other_messages": self.get_mode(mode)},
                     "previews": {"can_add_web_page_previews": self.get_mode(mode)},
@@ -215,7 +250,7 @@ class Lockings(plugin.Plugin):
         )
 
     async def get_chat_restrictions(self, chat_id: int) -> List[str]:
-        data = await self.db.find_one({"chat_id": chat_id})
+        data = await self.db.find_one({"chat_id": chat_id}, {"type": 1})
         return data["type"] if data else []
 
     def unpack_permissions(
@@ -299,7 +334,9 @@ class Lockings(plugin.Plugin):
         for types in sorted(list(LOCK_TYPES) + list(self.restrictions["lock"])):
             text += f"\n × `{types}`"
 
-        return await ctx.get_text("lockings-types-available") + text
+        return (
+            await ctx.get_text("lockings-types-available") + text + await ctx.get_text("types-note")
+        )
 
     @command.filters(filters.admin_only)
     async def cmd_unlock(self, ctx: command.Context, unlock_type: Optional[str] = None) -> str:

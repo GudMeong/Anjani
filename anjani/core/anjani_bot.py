@@ -1,5 +1,5 @@
 """Anjani base"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -16,7 +16,7 @@
 
 import asyncio
 import logging
-from typing import Any, Optional
+from typing import Optional
 
 import aiohttp
 import pyrogram
@@ -75,6 +75,7 @@ class Anjani(TelegramBot, DatabaseProvider, PluginExtender, CommandDispatcher, E
             await self.dispatch_event("stop")
             if self.client.is_connected:
                 await self.client.stop()
+
         await self.http.close()
         await self.db.close()
 

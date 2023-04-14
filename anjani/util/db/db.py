@@ -1,5 +1,5 @@
 """Anjani base database"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from typing import TYPE_CHECKING, Any, List, Mapping, Optional, Union
+from typing import TYPE_CHECKING, Any, List, Literal, Mapping, Optional, Union
 
 from bson.codec_options import CodecOptions
 from bson.dbref import DBRef
@@ -30,9 +30,9 @@ from anjani import util
 from .base import AsyncBaseProperty
 from .change_stream import AsyncChangeStream
 from .client_session import AsyncClientSession
-from .collection import AsyncCollection, Collection
+from .collection import AsyncCollection
 from .command_cursor import AsyncCommandCursor, AsyncLatentCommandCursor, CommandCursor
-from .types import ReadPreferences
+from .typings import ReadPreferences
 
 if TYPE_CHECKING:
     from .client import AsyncClient
@@ -58,7 +58,7 @@ class AsyncDatabase(AsyncBaseProperty):
         return self.dispatch is not None
 
     def __getitem__(self, name) -> AsyncCollection:
-        return AsyncCollection(Collection(self.dispatch, name))
+        return AsyncCollection(self, name)
 
     def __hash__(self) -> int:
         return hash((self.client, self.name))
@@ -119,7 +119,9 @@ class AsyncDatabase(AsyncBaseProperty):
         **kwargs: Any,
     ) -> AsyncCollection:
         return AsyncCollection(
-            await util.run_sync(
+            self,
+            name,
+            collection=await util.run_sync(
                 self.dispatch.create_collection,
                 name,
                 codec_options=codec_options,
@@ -129,7 +131,8 @@ class AsyncDatabase(AsyncBaseProperty):
                 session=session.dispatch if session else session,
                 check_exists=check_exists,
                 **kwargs,
-            )
+            ),
+            session=session,
         )
 
     async def dereference(
@@ -166,13 +169,12 @@ class AsyncDatabase(AsyncBaseProperty):
         read_concern: Optional[ReadConcern] = None,
     ) -> AsyncCollection:
         return AsyncCollection(
-            self.dispatch.get_collection(
-                name,
-                codec_options=codec_options,
-                read_preference=read_preference,
-                write_concern=write_concern,
-                read_concern=read_concern,
-            )
+            self,
+            name,
+            codec_options=codec_options,
+            read_preference=read_preference,
+            write_concern=write_concern,
+            read_concern=read_concern,
         )
 
     async def list_collection_names(
@@ -231,15 +233,16 @@ class AsyncDatabase(AsyncBaseProperty):
         self,
         pipeline: Optional[List[Mapping[str, Any]]] = None,
         *,
-        full_document: Optional[str] = None,
-        resume_after: Optional[Any] = None,
+        full_document: Optional[Literal["updateLookup"]] = None,
+        resume_after: Optional[Mapping[str, str]] = None,
         max_await_time_ms: Optional[int] = None,
         batch_size: Optional[int] = None,
         collation: Optional[Collation] = None,
         start_at_operation_time: Optional[Timestamp] = None,
         session: Optional[AsyncClientSession] = None,
-        start_after: Optional[Any] = None,
-        comment: Optional[str] = None
+        start_after: Optional[Mapping[str, str]] = None,
+        comment: Optional[str] = None,
+        full_document_before_change: Optional[Literal["required", "whenAvailable"]] = None,
     ) -> AsyncChangeStream:
         return AsyncChangeStream(
             self,
@@ -252,7 +255,8 @@ class AsyncDatabase(AsyncBaseProperty):
             start_at_operation_time,
             session,
             start_after,
-            comment
+            comment,
+            full_document_before_change,
         )
 
     def with_options(

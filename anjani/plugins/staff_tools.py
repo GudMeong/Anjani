@@ -1,5 +1,5 @@
 """staff's commands"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -47,7 +47,7 @@ class Staff(plugin.Plugin):
 
         text = ctx.input + "\n\n*This is a broadcast message."
         tasks: Set[asyncio.Task] = set()
-        async for chat in self.db.find({}):
+        async for chat in self.db.find({}, {"chat_id": 1, "type": 1}):
             if chat.get("type") == "channel":
                 continue
             if len(tasks) % 25 == 0:
@@ -90,7 +90,7 @@ class Staff(plugin.Plugin):
     async def cmd_chatlist(self, ctx: command.Context, get_all: Optional[bool] = False) -> None:
         """Send file of chat's I'm in"""
         chatfile = "List of chats.\n"
-        async for chat in self.db.find({}):
+        async for chat in self.db.find({}, {"chat_id": 1, "chat_name": 1, "type": 1}):
             if not get_all and chat.get("type") == "channel":
                 continue
 

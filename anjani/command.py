@@ -1,5 +1,5 @@
 """Anjani base command"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -70,13 +70,13 @@ class Command:
         name: str,
         plugin: Any,
         func: CommandFunc,
-        cmdFilter: Optional[Union[Filter, CustomFilter]],
+        cmd_filter: Optional[Union[Filter, CustomFilter]],
         aliases: Iterable[str],
     ) -> None:
         self.name = name
         self.plugin = plugin
         self.func = func
-        self.filters = cmdFilter
+        self.filters = cmd_filter
         self.aliases = aliases
 
     def __repr__(self) -> str:

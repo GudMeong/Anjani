@@ -1,5 +1,5 @@
 """Anjani converter"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -235,9 +235,9 @@ async def parse_arguments(
             # Consume remaining text to the kwargs
             kwargs[name] = " ".join(to_convert[idx:]).strip()
             break
-        elif param.kind == param.VAR_POSITIONAL:
+        elif param.kind in {param.VAR_POSITIONAL, param.VAR_KEYWORD}:
             raise BadArgument(
-                "Unsuported Variable Positional Argument conversion "
+                f"Unsuported {param.kind} parameter conversion "
                 f"Found '*{name}' on '{func.__name__}'"
             )
     return args, kwargs

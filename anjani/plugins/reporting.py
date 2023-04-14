@@ -1,5 +1,5 @@
 """ Admin reporting plugin """
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -52,27 +52,30 @@ class Reporting(plugin.Plugin):
     async def on_plugin_restore(self, chat_id: int, data: MutableMapping[str, Any]) -> None:
         await self.db.update_one({"chat_id": chat_id}, {"$set": data[self.name]}, upsert=True)
 
-    @listener.filters(filters.regex(r"^(?i)@admin(s)?\b") & filters.group)
+    @listener.filters(filters.regex(r"(?i)^@admin(s)?\b") & filters.group & ~filters.outgoing)
     async def on_message(self, message: Message) -> None:
         chat = message.chat
         user = message.from_user
         if not await self.is_active(chat.id, is_private=False):
             return
 
-        # Anonymous admins, so ignore it
+        # Anonymous, so ignores it
         if not user:
             return
 
-        invoker = await chat.get_member(user.id)
-        if invoker.status in {ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR}:
-            return  # ignore command from admins
+        try:
+            invoker = await chat.get_member(user.id)
+            if invoker.status in {ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR}:
+                return  # ignore command from admins
+        except UserNotParticipant:
+            pass  # keep going when user is not a member
 
         if not message.reply_to_message:
             await message.reply(await self.text(chat.id, "no-report-user"))
             return
 
         reported_user = message.reply_to_message.from_user
-        if not reported_user:  # Do nothing here, big chances are anonymous admins
+        if not reported_user:
             return
 
         if reported_user.id == self.bot.uid:
@@ -131,6 +134,7 @@ class Reporting(plugin.Plugin):
 
         return data.get("setting", True)
 
+    @command.filters(filters.group)
     async def cmd_report(self, ctx: command.Context) -> None:
         return await self.on_message(ctx.message)
 
@@ -156,7 +160,10 @@ class Reporting(plugin.Plugin):
             return await self.text(chat.id, "err-yes-no-args")
 
         _, member = await util.tg.fetch_permissions(self.bot.client, chat.id, ctx.author.id)
-        if member.status not in {ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER}:
+        if not member or member.status not in {
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.OWNER,
+        }:
             return None
 
         if setting is True:

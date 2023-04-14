@@ -1,5 +1,5 @@
 """ Debugging purpose """
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -144,12 +144,13 @@ class Debug(plugin.Plugin):
 
                 return None
 
-        return escape(
-            f"""{prefix}**In:**
-```{code}```
+        await ctx.respond(
+            f"""{prefix}<b>In:</b>
+<pre language="python">{escape(code)}</pre>
 
-**Out:**
-```{out}```
+<b>Out:</b>
+<pre language="python">{escape(out)}</pre>
 
-Time: {el_str}"""
+Time: {el_str}""",
+            parse_mode=pyrogram.enums.parse_mode.ParseMode.HTML,
         )

@@ -1,5 +1,5 @@
 """User language setting"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -82,6 +82,7 @@ class Language(plugin.Plugin):
 
         await self.switch_lang(chat.id, lang_match)
         try:
+            await query.answer()
             await query.edit_message_text(
                 text=await self.text(chat.id, "language-set-succes", lang),
             )

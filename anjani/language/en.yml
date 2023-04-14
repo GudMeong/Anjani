@@ -14,12 +14,21 @@ help-pm: |
   × /start: Starts me, can be used to check i'm alive or not.
   × /help: PM's you this message.
   × /setlang: Change your language preference.
+  × /donate: Get information on how to support me.
+
+  Anjani settings are also configurable on our dashboard, [click here](https://userbotindo.com/dashboard?ref=anjani) to open dashboard.
 start-chat: Sending you a warm hi & wishing your day is a happy one!
 help-chat: Contact me in PM to get the list of possible commands.
 add-to-group-button: Add to Group 👥
 start-help-button: Help & Commands ❔
 help-chat-button: Help
+dashboard-button: Dashboard
 back-button: ⬅️ Back
+donate: |
+  Hi, glad to see you want to donate!
+  You can donate to us on [our site](https://userbotindo.com/donate?ref=anjani).
+  Our team is fully handled by volunteers,, and every little helps to improve our services.
+  Thank you for your support!
 markdown-helper: |
   Markdown is a very powerful formatting tool supported by telegram. {} has some enhancements, to make sure that saved messages are correctly parsed, and to allow you to create buttons.\n
   <b>Supported Markdown:</b>
@@ -77,11 +86,13 @@ finding-zombie: "`Finding zombies account...`"
 cleaning-zombie: "**{}** `zombies found and has been removed..!` 🚮"
 zombie-clean: "`Zombies not found, group are clean..` "
 promote-error-invalid: "**User id invalid**\n`make sure he is a member here, and you enter the correct id/username!`"
+promote-error-privacy-restricted: "**The user has privacy settings that prevent to perform this action**\n`make sure he is a member here, and you enter the correct id/username!`"
 promote-error-self: "__You can't promote yourself__"
 demote-success: "`Demoted successfully..`"
 demote-error-perm: "`I don't have permission to demote, I can only demote the ones I promote..`"
 no-demote-user: "`Bruh tell me who you want to demote..` 😒"
 demote-error-self: "__You sure you want to demote yourself?__"
+demote-error-creator: "__You can't demote creator of the group__"
 promote-success: "`Successfully Promoted..` ❤️"
 promote-error-perm: "`This user is already an admin!`"
 no-promote-user: "`Who should I promote?\nGive me some user!`"
@@ -132,6 +143,9 @@ federations-help: |
   × /feddemote | /fdemote: Demote a federation admin from your fed.
   × /fedbackup: Get a backup of banned user on federation in CSV (PM Only).
   × /fedrestore: export a federation backup file to restore banned users (PM Only).
+  × /subfed <fedID>: Subscribe to other federation. Users banned in the subscribed federation will be banned in your federation too.
+  Note: This doesn't affect your federation banlist. It only inherits the bans from the subscribed federation.
+  × /unsubfed <fedID>: Unsubscribe your federation from another. Bans from the other fed will no longer take effect.
   × /setfedlog: Sets the current chat as the federation log. All federation events will be logged here.
   × /unsetfedlog: Unset the federation log. Federation events will no longer be logged.
 
@@ -159,7 +173,13 @@ fed-delete-canceled: Federation deletion canceled
 fed-delete-done: I have deleted your Federation!\nAll groups that connect to **{}** are now federation-less.
 fed-cant-two-feds: You cannot join two federations in one chat!
 fed-invalid-id: Please enter a valid federation ID
-fed-invalid-user-id: "Please enter a valid user ID\nUsage: `/fstats <user_id> <fed_id>`"
+fed-invalid-user-id: |
+  Please enter a valid user ID
+  Usage:
+    - `/fstats <user_id> <fed_id>``: Check fban status of a user in a federation.
+    - `/fstats <user_id>`: check all fban stats for user in all federations.
+    - `/fstats <reply>`: check all fban stats for replied user in all federations.
+    - `/fstats`: check all fban stats for you in all federations.
 fed-already-connected: This group is already connected to that federation!
 fed-chat-joined-info: Chat joined to **{}** Federation!
 fed-not-connected: This chat isn't connected to that federation!
@@ -184,6 +204,8 @@ fed-info-text: |
   **Total banned user: ** `{}`
   **Total banned channel: ** `{}`
   **Total groups connected: ** `{}`
+  **Total fed subscribers: ** `{}`
+fed-info-subscription: "\nSubscribed to the following feds:\n"
 fed-admin-only: Only federation admin can do this!
 fed-admin-text: |
   **{} admins:**
@@ -236,7 +258,13 @@ fed-log-set-chnl: "This channel has been set as the fed log for **{}**\nall fed 
 fed-invalid-identity: The user who clicked confirmation button was not the fed creator.\nOnly the federation creator can set the fed log.
 fed-log-unset: Federation log of **{}** is unset.
 fed-autoban: "User {} is banned in the current federation (**{}**), and has been removed.\n**Reason:** {}\n**Banned on:** {}"
-fed-autoleave: "I no longger have permission to ban members in this chat. Leaving fed \"{}\"(`{}`)"
+fed-autoban-chat: "Channel {} is banned in the current federation (**{}**), and has been removed.\n**Reason:** {}\n**Banned on:** {}"
+fed-autoban-subfed: "User {} is banned in subfederation (**{}**) and has been removed\n**Reason:** {}\n**Banned on:** {}"
+fed-autoban-chat-subfed: "Channel {} is banned in subfederation (**{}**) and has been removed\n**Reason:** {}\n**Banned on:** {}"
+fed-autoleave: 'I no longger have permission to ban members in this chat. Leaving fed "{}"(`{}`)'
+fed-owner-cmd: "This command is only for federation owner!"
+fed-subs-join: "Federation **{}** has subscribed to **{}**"
+fed-subs-leave: "Federation **{}** has unsubscribed from **{}**"
 #endregion
 #region filters
 filters-button: Filters
@@ -250,12 +278,12 @@ filters-help: |
   Filters also support markdown and formatters (check /formathelp).
 filters-added: "Successfully added `{}` as filters."
 filters-removed: "Successfully removed `{}` from filters."
-filter-help: "Usage: `/filters <trigger> <text>`."
+filter-help: "Usage: `/filter <trigger> <text>`."
 filter-stop-help: "Usage: `/stop <trigger>`."
 filters-chat-nofilter: This chat has no filters.
 filters-chat-nokeyword: "No filters named `{}` on this chat."
 filters-rmall: "Successfully removed {} filters in this chat."
-filters-list: "Filters in **{}**:"
+filters-list: "Filters in **{}**:\n"
 #endregion
 #region language
 language-button: Language
@@ -289,8 +317,8 @@ miscs-help: |
           [-s, spacebin] = use spacebin.
 paste-wait: "`Pasting to {}...`"
 paste-succes: "**Pasted to {} successfully..!**"
-paste-fail: "`Failed to reach {}!`\nYou can use flag [-h, -k] to use other services."
-paste-invalid: "Invalid '**{}**' flag.\nAvailable flags: __[-h, -k, -s, hastebin, katbin, spacebin]__"
+paste-fail: "`Failed to reach {}!`\nYou can use flag __[-s, stashbin, hastebin, -h, spacebin]__ to use other services."
+paste-invalid: "Invalid '**{}**' flag.\nAvailable flags: __[-s, stashbin, hastebin, -h, spacebin]__"
 #endregion
 #region mute
 muting-button: Muting
@@ -327,7 +355,7 @@ notes-help: |
   × /save <notename> <note text>: Save a new note named "<notename>". Replying to a message will save the replied message.
   × /clear <notename> | /delnote <notename>: Delete the matched note if exist.
   \nCheck /markdownhelp for more notes formatting info.
-notes-invalid-args : |
+notes-invalid-args: |
   Reply to a message with text or provide text after notes name.
   E.g.: /save <notename> <msg/reply to msg>
 note-saved: "Notes saved as `{}`."
@@ -386,6 +414,7 @@ restriction-help: |
   **Admin Only:**
   × /kick <userhandle> [reason]: Kicks a user. (via handle, or reply)
   × /ban <userhandle> [reason]: Bans a user. (via handle, or reply)
+  × /sban <userhandle>: Silently bans a user. (via handle, or reply)
   × /unban <userhandle>: Unbans a user. (via handle, or reply)
   × /kickme: If you're bored in the group? let the bot kick yourself.
   × /warn <userhandle> [reason]: Warn a user. (via handle, or reply)
@@ -444,7 +473,8 @@ rules-clear: Successfully cleared chat rules!
 rules-none: Failed to get chat rules! No records found.
 rules-view-caption: Click this button to view the chat rules!
 rules-view-pm: "The rules for **{}** are:\n\n"
-rules-invalid-button: "Invalid chat_id: \"{}\". (__Invalid Syntax__)"
+rules-invalid-button: 'Invalid chat_id: "{}". (__Invalid Syntax__)'
+rules-channel-invalid: Chat is not accessible, it's probably because i've been banned.
 #endregion
 #region spam prediction
 spampredict-button: Spam Prediction
@@ -452,8 +482,11 @@ spampredict-help: |
   For addition we currently developing a spam protection using a machine learning. The bot will detect and delete spam messages from your chats.
   You can also help us to train our model by casting a vote on @SpamPredictionLog. You will earn a reputation point with some benefit in the future 😉.\n
   **Admin Commands:**
-  /spampredict <on/off/yes/no>: Will disable or enable the message spam prediction in your group.\n
-  If enabled, the bot will automaticaly delete and log the message to @SpamPredictionLog.
+  × /spampredict <on/off/yes/no>: Will disable or enable the message spam prediction in your group.\n
+  If enabled, the bot will automaticaly delete and log the message to @SpamPredictionLog.\n
+  **User Commands:**
+  × /predict <reply>: Will predict the message if it's a spam or not*.
+  *this will consume 10 reputation point.
 spampredict-set: "Chat spam prediction turned {}."
 spampredict-view: |
   Spam Prediction Setting: **{}**.
@@ -461,9 +494,10 @@ spampredict-view: |
 spampredict-empty: message/photo text nor caption is empty to predict...
 spampredict-photo: "Reading photo text with ocr...\nThis might take a while."
 spampredict-photo-failed: "__Failed to read photo text with ocr.__\n\n"
-spampredict-unauthorized: |
-  Your reputation point is not enough to use this command! ({}/100)
-  To get a reputation point cast a vote on @SpamPredictionLog.
+spampredict-insuficent: |
+  Insuficent reputation to run prediction!.
+  Prediction will consume {} reputation point, you only have {} reputation point.
+  You can earn reputation by voting on @SpamPredictionLog.
 spampredict-failed: Prediction failed...
 spampredict-ban: "{user} has been banned!"
 spampredict-ban-no-perm: You don't have permission to ban users!
@@ -491,11 +525,11 @@ greetings-button: Greetings
 greetings-help: |
   your group's welcome messages that can be personalised in multiple ways.\n
   **Admin Commands:**
-  × /setwelcome <reply> : Sets a custom welcome message.
+  × /setwelcome <text> | <reply> : Sets a custom welcome message.
   × /resetwelcome : Resets to bot default welcome message.
   × /welcome <on/off> : enable/disable Welcome messages.
   × /welcome : Display current welcome message and settings.\n
-  × /setgoodbye <reply> : Sets a custom goodbye message.
+  × /setgoodbye <text> | <reply> : Sets a custom goodbye message.
   × /resetgoodbye : Resets to bot default goodbye message.
   × /goodbye <on/off> : enable/disable goodbye messages.
   × /goodbye : Display current goodbye message and settings.\n
@@ -504,6 +538,7 @@ greetings-help: |
   Example: `/welcome noformat`
 
   Check /markdownhelp and /fillinghelp for formatting details.
+greetings-no-input: Please provide the text you want to set!
 bot-added: |
   Hi... Thanks for inviting me.
   To see available commands type /help.
@@ -550,6 +585,9 @@ unlockings-type-required: Please provide a type of unlock.
 unlockings-type-unlocked: "'`{unlock_type}`' is not locked."
 unlockings-type-invalid: "'`{unlock_type}`' invalid unlock type."
 unlockings-type-done: Successfully unlocked '`{unlock_type}`'.
+types-note: |
+  \n\n__Note__:
+  × **other** -> locks **animation**, **game**, **sticker** and **inline** at the same time.
 #endregion
 #region common-error
 error-its-myself: "I can't do anything for myself 😒"
@@ -558,7 +596,7 @@ err-chat-private: This command is specific to PM's only!
 error-no-rights: "You don't have rights to use this command!"
 err-not-participant: "This user is not a member of this chat!"
 err-invalid-option: Invalid option!
-err-invalid-username-id : "`Invalid username or userid!`"
+err-invalid-username-id: "`Invalid username or userid!`"
 error-reply-to-message: Reply to a message!
 err-yes-no-args: Usage is on/yes or off/no
 err-peer-invalid: "**PEER_ID_INVALID**\nLooks like I don't have an access to this user, or the ID isn't a valid one."
@@ -567,7 +605,9 @@ err-group-creator-cmd: Only group creator can use this command!
 err-invalid-pid: Invalid identifier!
 err-anonymous: You are on anonymous mode...\n\n__Disable it first.__
 err-not-admin: You are not an Administrator of this group...
-err-perm: You and I need permission of __{}__, to be able to use the command.
+err-perm: We are not administrator of this group.
 err-unexpected: "An unexpected error occurred.! \n\n**Error:** `{}`"
-err-msg-format-parsing: "**Message format parsing error!**\n**Error on key:** `{err}`."
+err-msg-format-parsing: "**Message format parsing error!**\n**Error on:** `{err}`."
+err-im-not-admin: "I'm not an admin here! I need to be an admin to do this."
+err-illegal-trigger: "Illegal character in trigger!\n'.' and '$' are not allowed"
 #endregion

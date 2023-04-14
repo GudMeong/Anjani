@@ -1,5 +1,5 @@
 """Anjani database collection"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,15 +14,25 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from typing import Any, Generic, List, Mapping, Optional, Tuple, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Generic,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Tuple,
+    Union,
+)
 
 from bson.codec_options import CodecOptions
 from bson.timestamp import Timestamp
 from pymongo.collation import Collation
 from pymongo.collection import Collection
-from pymongo.database import Database
 from pymongo.operations import IndexModel
 from pymongo.read_concern import ReadConcern
+from pymongo.read_preferences import _ServerMode
 from pymongo.results import (
     BulkWriteResult,
     DeleteResult,
@@ -40,7 +50,10 @@ from .change_stream import AsyncChangeStream
 from .client_session import AsyncClientSession
 from .command_cursor import AsyncLatentCommandCursor
 from .cursor import AsyncCursor, AsyncRawBatchCursor, Cursor
-from .types import ReadPreferences, Request
+from .typings import ReadPreferences, Request
+
+if TYPE_CHECKING:
+    from .db import AsyncDatabase
 
 
 class AsyncCollection(AsyncBaseProperty, Generic[_DocumentType]):
@@ -49,26 +62,50 @@ class AsyncCollection(AsyncBaseProperty, Generic[_DocumentType]):
     *DEPRECATED* methods are removed in this class.
     """
 
+    database: "AsyncDatabase"
     dispatch: Collection
 
-    def __init__(self, dispatch: Collection) -> None:
+    def __init__(
+        self,
+        database: "AsyncDatabase",
+        name: str,
+        *,
+        create: bool = False,
+        codec_options: Optional[CodecOptions] = None,
+        read_preference: Optional[_ServerMode] = None,
+        write_concern: Optional[WriteConcern] = None,
+        read_concern: Optional[ReadConcern] = None,
+        collection: Optional[Collection] = None,
+        session: Optional[AsyncClientSession] = None,
+        **kwargs: Any,
+    ) -> None:
+        dispatch = (
+            collection
+            if collection is not None
+            else Collection(
+                database.dispatch,
+                name,
+                create=create,
+                codec_options=codec_options,
+                read_preference=read_preference,
+                write_concern=write_concern,
+                read_concern=read_concern,
+                session=session.dispatch if session else session,
+                **kwargs,
+            )
+        )
         # Propagate initialization to base
         super().__init__(dispatch)
+        self.database = database
 
     def __bool__(self) -> bool:
         return self.dispatch is not None
 
     def __getitem__(self, name: str) -> "AsyncCollection":
         return AsyncCollection(
-            Collection(
-                self.database,
-                f"{self.name}.{name}",
-                False,
-                self.codec_options,
-                self.read_preference,
-                self.write_concern,
-                self.read_concern,
-            )
+            self.database,
+            f"{self.name}.{name}",
+            collection=self.dispatch[name],
         )
 
     def __hash__(self) -> int:
@@ -453,15 +490,16 @@ class AsyncCollection(AsyncBaseProperty, Generic[_DocumentType]):
         self,
         pipeline: Optional[List[Mapping[str, Any]]] = None,
         *,
-        full_document: Optional[str] = None,
-        resume_after: Optional[Any] = None,
+        full_document: Optional[Literal["updateLookup"]] = None,
+        resume_after: Optional[Mapping[str, str]] = None,
         max_await_time_ms: Optional[int] = None,
         batch_size: Optional[int] = None,
         collation: Optional[Collation] = None,
         start_at_operation_time: Optional[Timestamp] = None,
         session: Optional[AsyncClientSession] = None,
-        start_after: Optional[Any] = None,
+        start_after: Optional[Mapping[str, str]] = None,
         comment: Optional[str] = None,
+        full_document_before_change: Optional[Literal["required", "whenAvailable"]] = None,
     ) -> AsyncChangeStream:
         return AsyncChangeStream(
             self,
@@ -475,6 +513,7 @@ class AsyncCollection(AsyncBaseProperty, Generic[_DocumentType]):
             session,
             start_after,
             comment,
+            full_document_before_change,
         )
 
     def with_options(
@@ -493,10 +532,6 @@ class AsyncCollection(AsyncBaseProperty, Generic[_DocumentType]):
         )
 
         return self
-
-    @property
-    def database(self) -> Database:
-        return self.dispatch.database
 
     @property
     def full_name(self) -> str:

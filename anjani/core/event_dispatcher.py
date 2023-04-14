@@ -1,5 +1,5 @@
 """Anjani event dispatcher"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,7 +17,7 @@
 import asyncio
 import bisect
 from hashlib import sha256
-from typing import TYPE_CHECKING, Any, MutableMapping, MutableSequence, Optional, Set
+from typing import TYPE_CHECKING, Any, MutableMapping, MutableSequence, Optional, Tuple
 
 from pyrogram import raw
 from pyrogram.filters import Filter
@@ -27,6 +27,7 @@ from pyrogram.types import CallbackQuery, InlineQuery, Message
 from anjani import plugin, util
 from anjani.error import EventDispatchError
 from anjani.listener import Listener, ListenerFunc
+from anjani.util.misc import StopPropagation
 
 from .anjani_mixin_base import MixinBase
 
@@ -38,6 +39,37 @@ EventType = (
     InlineQuery,
     Message,
 )
+
+
+def _get_event_data(event: Any) -> MutableMapping[str, Any]:
+    if isinstance(event, Message):
+        return {
+            "chat_title": event.chat.title,
+            "chat_id": event.chat.id,
+            "user_name": event.from_user.first_name if event.from_user else event.sender_chat.title,
+            "user_id": event.from_user.id if event.from_user else event.sender_chat.id,
+            "input": event.text,
+        }
+    if isinstance(event, CallbackQuery):
+        return {
+            "chat_title": event.message.chat.title,
+            "chat_id": event.message.chat.id,
+            "user_name": event.from_user.first_name,
+            "user_id": event.from_user.id,
+            "input": event.data,
+        }
+    if isinstance(event, InlineQuery):
+        return {
+            "user_name": event.from_user.first_name,
+            "user_id": event.from_user.id,
+            "input": event.query,
+        }
+    return {}
+
+
+def _unpack_args(args: Tuple[Any, ...]) -> str:
+    """Unpack arguments into a string for logging purposes."""
+    return ", ".join([str(arg) for arg in args])
 
 
 class EventDispatcher(MixinBase):
@@ -115,11 +147,9 @@ class EventDispatcher(MixinBase):
         self: "Anjani",
         event: str,
         *args: Any,
-        wait: bool = True,
-        get_tasks: bool = False,
         **kwargs: Any,
-    ) -> Optional[Set[asyncio.Task[Any]]]:
-        tasks = set()
+    ) -> Optional[Tuple[Any, ...]]:
+        results = []
 
         try:
             listeners = self.listeners[event]
@@ -129,14 +159,17 @@ class EventDispatcher(MixinBase):
         if not listeners:
             return None
 
+        self.log.debug("Dispatching event '%s' with data %s", event, args)
+
         match = None
         index = None
+        is_tg_event = False
         for lst in listeners:
             if lst.filters:
                 for idx, arg in enumerate(args):
-                    if isinstance(arg, EventType):
-                        permitted: bool = await lst.filters(self.client, arg)
-                        if not permitted:
+                    is_tg_event = isinstance(arg, EventType)
+                    if is_tg_event:
+                        if not await lst.filters(self.client, arg):
                             continue
 
                         match = arg.matches
@@ -147,38 +180,55 @@ class EventDispatcher(MixinBase):
                 else:
                     continue
 
-            task = self.loop.create_task(lst.func(*args, **kwargs))
-            tasks.add(task)
+            if match and index is not None:
+                args[index].matches = match
 
-        if not tasks:
-            return None
-
-        if match and index is not None:
-            args[index].matches = match
-
-        self.log.debug("Dispatching event '%s' with data %s", event, args)
-        if wait:
-            await asyncio.wait(tasks)
-            for task in tasks:
-                try:
-                    task.result()
-                except Exception as err:  # skipcq: PYL-W0703 - Handle all future exception
-                    dispatcher_error = EventDispatchError(
-                        f"raised from {type(err).__name__}: {str(err)}"
-                    ).with_traceback(err.__traceback__)
+            result = None
+            try:
+                result = await lst.func(*args, **kwargs)
+            except KeyError:
+                continue
+            except StopPropagation:
+                break
+            except Exception as err:  # skipcq: PYL-W0703
+                dispatcher_error = EventDispatchError(
+                    f"raised from {type(err).__name__}: {str(err)}"
+                ).with_traceback(err.__traceback__)
+                if is_tg_event and args[0] is not None:
+                    data = _get_event_data(args[0])
                     self.log.error(
-                        "Error dispatching event '%s' on %s",
+                        "Error dispatching event '%s' on %s\n"
+                        "  Data:\n"
+                        "    • Chat    -> %s (%d)\n"
+                        "    • Invoker -> %s (%d)\n"
+                        "    • Input   -> %s",
                         event,
-                        task.get_coro().__qualname__,
+                        lst.func.__qualname__,
+                        data.get("chat_title", "Unknown"),
+                        data.get("chat_id", -1),
+                        data.get("user_name", "Unknown"),
+                        data.get("user_id", -1),
+                        data.get("input"),
                         exc_info=dispatcher_error,
                     )
+                else:
+                    self.log.error(
+                        "Error dispatching event '%s' on %s with data\n%s",
+                        event,
+                        lst.func.__qualname__,
+                        _unpack_args(args),
+                        exc_info=dispatcher_error,
+                    )
+                continue
+            finally:
+                if result:
+                    results.append(result)
 
-                    continue
+                match = None
+                index = None
+                result = None
 
-        if get_tasks:
-            return tasks
-
-        return None
+        return tuple(results)
 
     async def dispatch_missed_events(self: "Anjani") -> None:
         if not self.loaded or self._TelegramBot__running:
@@ -247,8 +297,12 @@ class EventDispatcher(MixinBase):
 
                     await asyncio.wait(
                         (
-                            send_missed_message(diff.new_messages, users, chats),
-                            send_missed_update(diff.other_updates, users, chats),
+                            self.loop.create_task(
+                                send_missed_message(diff.new_messages, users, chats)
+                            ),
+                            self.loop.create_task(
+                                send_missed_update(diff.other_updates, users, chats)
+                            ),
                         )
                     )
                 elif isinstance(diff, raw.types.updates.difference_empty.DifferenceEmpty):
@@ -260,7 +314,7 @@ class EventDispatcher(MixinBase):
                     continue
                 else:
                     break
-        except (ConnectionError, OSError, asyncio.CancelledError):
+        except (OSError, asyncio.CancelledError):
             pass
         finally:
             # Unset after we finished to avoid sending the same pts and date,
@@ -271,4 +325,4 @@ class EventDispatcher(MixinBase):
             )
 
     async def log_stat(self: "Anjani", stat: str, *, value: int = 1) -> None:
-        await self.dispatch_event("stat_listen", stat, value, wait=False)
+        await self.dispatch_event("stat_listen", stat, value)

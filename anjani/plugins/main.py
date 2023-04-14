@@ -1,5 +1,5 @@
 """ Main Anjani plugins """
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -23,7 +23,12 @@ from aiopath import AsyncPath
 from bson.binary import Binary
 from pyrogram.enums.chat_type import ChatType
 from pyrogram.enums.parse_mode import ParseMode
-from pyrogram.errors import MessageDeleteForbidden, MessageNotModified
+from pyrogram.errors import (
+    ChannelInvalid,
+    ChannelPrivate,
+    MessageDeleteForbidden,
+    MessageNotModified,
+)
 from pyrogram.raw.functions.updates.get_state import GetState
 from pyrogram.types import (
     CallbackQuery,
@@ -79,12 +84,15 @@ class Main(plugin.Plugin):
                 status_msg = status_msg[0]
 
             self.bot.log.info(f"Bot downtime {duration_str}")
-            await self.sendToLogChannel(
+            await self.send_to_log(
                 f"Bot downtime {duration_str}.", reply_to_message_id=status_msg.id
             )
-            await status_msg.delete()
+            try:
+                await status_msg.delete()
+            except MessageDeleteForbidden:
+                pass
         else:
-            await self.sendToLogChannel("Starting system...")
+            await self.send_to_log("Starting system...")
 
     async def on_stop(self) -> None:
         file = AsyncPath("anjani/anjani.session")
@@ -106,12 +114,12 @@ class Main(plugin.Plugin):
             upsert=True,
         )
 
-        status_msg = await self.sendToLogChannel("Shutdowning system...")
+        status_msg = await self.send_to_log("Shutdowning system...")
         self.bot.log.info("Preparing to shutdown...")
         if not status_msg:
             return
 
-        await self.db.find_one_and_update(
+        await self.db.update_one(
             {"_id": 5},
             {
                 "$set": {
@@ -123,7 +131,7 @@ class Main(plugin.Plugin):
             upsert=True,
         )
 
-    async def sendToLogChannel(self, text: str, *args: Any, **kwargs: Any) -> Optional[Message]:
+    async def send_to_log(self, text: str, *args: Any, **kwargs: Any) -> Optional[Message]:
         try:
             return await self.bot.client.send_message(
                 int(self.bot.config.log_channel), text, *args, **kwargs
@@ -217,20 +225,68 @@ class Main(plugin.Plugin):
                 rules_re = re.compile(r"rules_(.*)")
                 if rules_re.search(ctx.input):
                     plug: "Rules" = self.bot.plugins["Rules"]  # type: ignore
-                    return await plug.start_rules(ctx)
+                    try:
+                        return await plug.start_rules(ctx)
+                    except (ChannelInvalid, ChannelPrivate):
+                        return await self.text(chat.id, "rules-channel-invalid")
 
+                help_re = re.compile(r"help_(.*)").match(ctx.input)
+                if help_re:
+                    text_lang = await self.text(chat.id, f"{help_re.group(1)}-help")
+                    text = (
+                        f"Here is the help for the **{ctx.input.capitalize()}** "
+                        f"plugin:\n\n{text_lang}"
+                    )
+                    await ctx.respond(
+                        text,
+                        reply_markup=InlineKeyboardMarkup(
+                            [
+                                [
+                                    InlineKeyboardButton(
+                                        await self.text(chat.id, "back-button"),
+                                        callback_data="help_back",
+                                    )
+                                ]
+                            ]
+                        ),
+                        parse_mode=ParseMode.MARKDOWN,
+                    )
+                    return
+
+            permission = [
+                "change_info",
+                "post_messages",
+                "edit_messages",
+                "delete_messages",
+                "restrict_members",
+                "invite_users",
+                "pin_messages",
+                "promote_members",
+                "manage_video_chats",
+                "manage_chat",
+            ]
             buttons = [
                 [
                     InlineKeyboardButton(
                         text=await self.text(chat.id, "add-to-group-button"),
-                        url=f"t.me/{self.bot.user.username}?startgroup=true",
+                        url=f"t.me/{self.bot.user.username}?startgroup=true&admin={'+'.join(permission)}",
                     ),
                     InlineKeyboardButton(
                         text=await self.text(chat.id, "start-help-button"),
                         url=f"t.me/{self.bot.user.username}?start=help",
                     ),
-                ]
+                ],
             ]
+            if "Canonical" in self.bot.plugins:
+                buttons.append(
+                    [
+                        InlineKeyboardButton(
+                            text=await self.text(chat.id, "dashboard-button"),
+                            url="https://userbotindo.com/dashboard",
+                        )
+                    ]
+                )
+
             await ctx.respond(
                 await self.text(chat.id, "start-pm", self.bot_name),
                 reply_markup=InlineKeyboardMarkup(buttons),
@@ -265,6 +321,13 @@ class Main(plugin.Plugin):
         await ctx.respond(
             await self.text(chat.id, "help-pm", self.bot_name),
             reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+
+    async def cmd_donate(self, ctx: command.Context) -> None:
+        """Bot donate command"""
+        await ctx.respond(
+            await self.text(ctx.chat.id, "donate"),
+            disable_web_page_preview=True,
         )
 
     async def cmd_markdownhelp(self, ctx: command.Context) -> None:

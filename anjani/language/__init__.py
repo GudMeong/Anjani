@@ -1,5 +1,5 @@
 """Anjani language"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,7 +19,7 @@ from typing import AsyncIterator
 from aiopath import AsyncPath
 
 
-async def getLangFile() -> AsyncIterator[AsyncPath]:
+async def get_lang_file() -> AsyncIterator[AsyncPath]:
     async for language_file in AsyncPath("anjani/language").iterdir():
         if language_file.suffix == ".yml":
             yield language_file

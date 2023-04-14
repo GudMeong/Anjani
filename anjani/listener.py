@@ -1,5 +1,5 @@
 """Anjani event listener"""
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -55,13 +55,13 @@ class Listener:
         func: ListenerFunc,
         plugin: Any,
         prio: int,
-        listenerFilter: Optional[Filter] = None,
+        listener_filter: Optional[Filter] = None,
     ) -> None:
         self.event = event
         self.func = func
         self.plugin = plugin
         self.priority = prio
-        self.filters = listenerFilter
+        self.filters = listener_filter
 
     def __lt__(self, other: "Listener") -> bool:
         return self.priority < other.priority

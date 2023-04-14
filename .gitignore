@@ -1,8 +1,11 @@
 __pycache__/
 
 # environment file
-*.env
+config.env*
 !sample_config.env
+
+# Build folder
+dist/
 
 # file
 .DS_Store
@@ -16,3 +19,6 @@ downloads/
 .idea/
 .vscode/
 *.sw*
+
+# Generated files
+CHANGELOG.md

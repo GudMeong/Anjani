@@ -1,5 +1,5 @@
 """ Filters plugin. """
-# Copyright (C) 2020 - 2022  UserbotIndo Team, <https://github.com/userbotindo.git>
+# Copyright (C) 2020 - 2023  UserbotIndo Team, <https://github.com/userbotindo.git>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,12 +14,24 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import asyncio
 import re
-from typing import Any, ClassVar, List, MutableMapping, Optional, Tuple
+from typing import (
+    Any,
+    Callable,
+    ClassVar,
+    Coroutine,
+    MutableMapping,
+    Optional,
+    Set,
+    Tuple,
+)
 
+from pyrogram.errors import MediaEmpty, MessageEmpty
 from pyrogram.types import Message
 
-from anjani import command, filters, plugin, util
+from anjani import command, filters, listener, plugin, util
+from anjani.util.tg import Types, build_button, get_message_info
 
 
 class Filters(plugin.Plugin):
@@ -27,14 +39,27 @@ class Filters(plugin.Plugin):
     helpable: ClassVar[bool] = True
 
     db: util.db.AsyncCollection
-    trigger: MutableMapping[int, List[str]] = {}
+    trigger: MutableMapping[int, Set[str]] = {}
+    SEND: MutableMapping[int, Callable[..., Coroutine[Any, Any, Optional[Message]]]]
 
     async def on_load(self) -> None:
         self.db = self.bot.db.get_collection("FILTERS")
+        self.SEND = {
+            Types.TEXT.value: self.bot.client.send_message,
+            Types.BUTTON_TEXT.value: self.bot.client.send_message,
+            Types.DOCUMENT.value: self.bot.client.send_document,
+            Types.PHOTO.value: self.bot.client.send_photo,
+            Types.VIDEO.value: self.bot.client.send_video,
+            Types.STICKER.value: self.bot.client.send_sticker,
+            Types.AUDIO.value: self.bot.client.send_audio,
+            Types.VOICE.value: self.bot.client.send_voice,
+            Types.VIDEO_NOTE.value: self.bot.client.send_video_note,
+            Types.ANIMATION.value: self.bot.client.send_animation,
+        }
 
     async def on_start(self, _: int) -> None:
         async for chat in self.db.find({}):
-            self.trigger[chat["chat_id"]] = list(chat["trigger"].keys())
+            self.trigger[chat["chat_id"]] = set(chat["trigger"].keys())
 
     async def on_plugin_backup(self, chat_id: int) -> MutableMapping[str, Any]:
         data = await self.db.find_one({"chat_id": chat_id}, {"_id": False})
@@ -52,7 +77,11 @@ class Filters(plugin.Plugin):
             {"$set": {"chat_id": new_chat}},
         )
 
+    @listener.priority(95)
     async def on_message(self, message: Message) -> None:
+        if message.outgoing:
+            return
+
         chat = message.chat
         text = message.text or message.caption
 
@@ -63,9 +92,9 @@ class Filters(plugin.Plugin):
         if not chat_trigger:
             return
 
-        await self.reply_filter(message, chat_trigger, text)
+        await self.reply_filter(message, set(chat_trigger), text)
 
-    async def reply_filter(self, message: Message, trigger: List[str], text: str):
+    async def reply_filter(self, message: Message, trigger: Set[str], text: str):
         if not text or text.startswith("/filter") or text.startswith("/stop"):
             return  # Igonore when command triggered
         for i in trigger:
@@ -75,22 +104,59 @@ class Filters(plugin.Plugin):
                 if not filt:
                     return
 
-                await message.reply_text(filt)
+                # This checks data for old filters schema
+                # TODO: deprecate old schema on v3
+                if isinstance(filt, str):
+                    await message.reply_text(filt)
+                else:
+                    reply_to = (
+                        message.reply_to_message.id if message.reply_to_message else message.id
+                    )
+                    types: int = filt["type"]
+                    button = filt.get("button", None)
+                    if button:
+                        keyb = build_button(button)
+                    else:
+                        keyb = button
+
+                    try:
+                        if types in {Types.TEXT, Types.BUTTON_TEXT}:
+                            await self.SEND[types](
+                                message.chat.id,
+                                filt["text"],
+                                reply_to_message_id=reply_to,
+                                reply_markup=keyb,
+                            )
+                        elif types in {Types.STICKER, Types.ANIMATION}:
+                            await self.SEND[types](
+                                message.chat.id,
+                                filt["content"],
+                                reply_to_message_id=reply_to,
+                            )
+                        else:
+                            await self.SEND[types](
+                                message.chat.id,
+                                filt["content"],
+                                caption=filt["text"],
+                                reply_to_message_id=reply_to,
+                                reply_markup=keyb,
+                            )
+                    except MediaEmpty:
+                        await self.bot.client.send_message(
+                            message.chat.id, await self.text(message.chat.id, "notes-expired")
+                        )
+                    except MessageEmpty:
+                        self.log.warning(
+                            "Filter message empty on %s with data %s", message.chat.id, filt
+                        )
                 break
 
     async def get_filter(self, chat_id: int, keyword: str) -> Optional[str]:
-        data = await self.db.find_one({"chat_id": chat_id})
-        return data["trigger"][keyword] if data else None
-
-    async def save_filter(self, chat_id: int, keyword: str, content: str):
-        await self.db.update_one(
-            {"chat_id": chat_id}, {"$set": {f"trigger.{keyword}": content}}, upsert=True
+        data = await self.db.find_one(
+            {"chat_id": chat_id, f"trigger.{keyword}": {"$exists": True}},
+            {f"trigger.{keyword}": 1},
         )
-
-        if self.trigger.get(chat_id):
-            self.trigger[chat_id].append(keyword)
-        else:
-            self.trigger[chat_id] = [keyword]
+        return data["trigger"][keyword] if data else None
 
     async def del_filter(self, chat_id: int, keyword: str) -> Tuple[bool, str]:
         filt = self.trigger.get(chat_id)
@@ -107,12 +173,46 @@ class Filters(plugin.Plugin):
         return True, ""
 
     @command.filters(filters.admin_only)
-    async def cmd_filter(self, ctx: command.Context, trigger: str, *, text: str) -> str:
-        if not trigger or not text:
-            return await self.text(ctx.chat.id, "filter-help")
+    async def cmd_filter(self, ctx: command.Context) -> str:
+        chat = ctx.chat
+        if (
+            len(ctx.args) < 2
+            and not ctx.message.reply_to_message
+            or ctx.msg.reply_to_message
+            and len(ctx.args) < 1
+        ):
+            return await self.text(chat.id, "filter-help")
 
-        await self.save_filter(ctx.chat.id, trigger, text)
-        return await self.text(ctx.chat.id, "filters-added", trigger)
+        trigger = ctx.args[0]
+
+        if "." in trigger or "$" in trigger:
+            return await self.text(chat.id, "err-illegal-trigger")
+
+        text, types, content, buttons = get_message_info(ctx.msg)
+        _, ret = await asyncio.gather(
+            self.db.update_one(
+                {"chat_id": chat.id},
+                {
+                    "$set": {
+                        f"trigger.{trigger}": {
+                            "text": text,
+                            "type": types,
+                            "content": content,
+                            "buttons": buttons,
+                        }
+                    }
+                },
+                upsert=True,
+            ),
+            self.text(chat.id, "filters-added", trigger),
+        )
+
+        if self.trigger.get(chat.id):
+            self.trigger[chat.id].add(trigger)
+        else:
+            self.trigger[chat.id] = {trigger}
+
+        return ret
 
     @command.filters(filters.admin_only)
     async def cmd_stop(self, ctx: command.Context, trigger: str) -> str:
@@ -141,5 +241,5 @@ class Filters(plugin.Plugin):
             return await self.text(ctx.chat.id, "filters-chat-nofilter")
 
         output = await self.text(ctx.chat.id, "filters-list", ctx.chat.title)
-        output += "\n".join([f"× `{i}`" for i in data])
+        output += "\n".join([f"× `{i}`" for i in sorted(data)])
         return output

@@ -1,0 +1,27 @@
+name: Feature Change
+description: Create a feature change for Anjani
+title: "[FEAT] "
+labels: ["type: feature", "feature: enhancement", "status: triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to propose a feature changes! Please fill out this form as completely as possible.
+        Feature request will be converted to the [Github Discussions (Ideas 💡)](https://github.com/userbotindo/Anjani/discussions/categories/ideas)
+        and will be mentioned on a new issue if the feature is accepted.
+  - type: textarea
+    attributes:
+      label: Summary
+      description: A clear and concise what feature you want to change.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: How the feature works currently?
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: How the feature should work?
+    validations:
+      required: true
