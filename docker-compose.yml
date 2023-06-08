@@ -7,6 +7,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        - USERBOTINDO_ACCESS_TOKEN=${USERBOTINDO_ACCESS_TOKEN}
+    ports:
+      - 8000:8000
     env_file:
       - config.env
     restart: unless-stopped

@@ -12,9 +12,6 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
-__version__ = "2.11.1"
-
-__description__ = "Telegram group management bot with spam protection."
+# along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 DEFAULT_CONFIG_PATH = "config.env"

@@ -22,6 +22,7 @@ help-chat: Contact me in PM to get the list of possible commands.
 add-to-group-button: Add to Group 👥
 start-help-button: Help & Commands ❔
 help-chat-button: Help
+status-page-button: Status
 dashboard-button: Dashboard
 back-button: ⬅️ Back
 donate: |
@@ -275,7 +276,7 @@ filters-help: |
   × /stop <keyword>: Stop the filter with the keyword.
   × /rmallfilters: Stop all filters in this chat.
 
-  Filters also support markdown and formatters (check /formathelp).
+  Filters also support markdown (check /markdownhelp).
 filters-added: "Successfully added `{}` as filters."
 filters-removed: "Successfully removed `{}` from filters."
 filter-help: "Usage: `/filter <trigger> <text>`."
@@ -520,6 +521,19 @@ spamshield-view: |
   Spam shield setting: **{}**.
   Spam shield is a usefull plugin to help protect your group from spammers and trollers.
 #endregion
+#region topic
+topic-button: Topic
+topic-help: |
+  Telegram Topics makes your group divided into different chats within the group (or forum).
+  This plugin help you manage your topic on Anjani.
+
+  A Topic group need to set a default "action topic" that will be used for greetings and more other action by Anjani.
+
+  **Admin Commands:**
+  × /setactiontopic | /setdefaulttopic: Set the current topic as the action topic of this forum.
+topic-non-topic: This is not a topic group!
+topic-set: This topic will be used for action topic.
+#endregion
 #region greetings
 greetings-button: Greetings
 greetings-help: |
@@ -538,6 +552,9 @@ greetings-help: |
   Example: `/welcome noformat`
 
   Check /markdownhelp and /fillinghelp for formatting details.
+greetings-topic-default: |
+  Forum chat detected. Bot will use the default action topic for greetings.
+  To set a default action topic, please set a default action topic as mentioned in this [topic help]({}).
 greetings-no-input: Please provide the text you want to set!
 bot-added: |
   Hi... Thanks for inviting me.
@@ -545,8 +562,10 @@ bot-added: |
 default-welcome: Hey {first}, how are you?\nWelcome to {chatname}
 clean-serv-set: Turned {} service messages cleaning.
 welcome-set: Welcome turned {} on new member join.
+welcome-message-expired: File ID for the media message got expired.\n__This might have occured because you must have changed the bot token. Please re-add the welcome media.__
 cust-welcome-set: Successfully set custom welcome message!
 reset-welcome: Successfully reset welcome message to default!
+unsupported-media-command: "Media with commands as captions are not supported yet. **TIP**: __Maybe just reply the command to the media?__"
 view-welcome: |
   **This chat has the welcome setting:**
   `Welcoming user` = `{}`

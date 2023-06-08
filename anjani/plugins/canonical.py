@@ -16,9 +16,11 @@
 
 import asyncio
 from base64 import b64encode
+from datetime import datetime, timezone
 from typing import Any, ClassVar, MutableMapping
 
 from aiopath import AsyncPath
+from pymongo import UpdateOne
 from pymongo.errors import PyMongoError
 from pyrogram.enums.chat_member_status import ChatMemberStatus
 from pyrogram.enums.chat_members_filter import ChatMembersFilter
@@ -32,11 +34,12 @@ from pyrogram.types import (
 )
 
 try:
-    import userbotindo
+    from userbotindo import WebServer
 
     _run_canonical = True
-    del userbotindo
 except ImportError:
+    from anjani.util.types import WebServer
+
     _run_canonical = False
 
 
@@ -53,7 +56,9 @@ class Canonical(plugin.Plugin):
     disabled: ClassVar[bool] = not _run_canonical
 
     # Private
+    _api: WebServer
     __task: asyncio.Task[None]
+    __web_server: asyncio.Task[None]
     _mt: MutableMapping[MessageMediaType, str] = {
         MessageMediaType.STICKER: "s",
         MessageMediaType.PHOTO: "p",
@@ -65,25 +70,47 @@ class Canonical(plugin.Plugin):
         self.db = self.bot.db.get_collection("TEST")
         self.db_analytics = self.bot.db.get_collection("ANALYTICS")
         self.chats_db = self.bot.db.get_collection("CHATS")
+        self._api = WebServer(
+            title="Anjani API Docs", description="API Documentation for Anjani Services"
+        )
 
     async def on_start(self, _: int) -> None:
         self.log.debug("Starting watch streams")
         self.__task = self.bot.loop.create_task(self.watch_streams())
+        self.__web_server = self.bot.loop.create_task(self._api.run())
 
     async def on_stop(self) -> None:
         self.log.debug("Stopping watch streams")
         self.__task.cancel()
+        self.__web_server.cancel()
 
     def get_type(self, message: Message) -> str:
+        if message.command:
+            return "c"
         return self._mt.get(message.media, "t") if message.media else "t"
 
     async def save_message_type(self, message: Message) -> None:
         today = util.time.sec()
         timestamp = today - (today % 86400)  # truncate to day
-        await self.db_analytics.update_one(
-            {"key": 2},
-            {"$inc": {f"data.{str(timestamp)}.{self.get_type(message)}": 1}},
-            upsert=True,
+
+        # TODO: Remove old schema after analytics migration
+        await self.db_analytics.bulk_write(
+            [
+                UpdateOne(
+                    {"key": 2},
+                    {"$inc": {f"data.{str(timestamp)}.{self.get_type(message)}": 1}},
+                    upsert=True,
+                ),
+                UpdateOne(  # new schema
+                    {
+                        "timestamp": datetime.now(timezone.utc).replace(
+                            minute=0, second=0, microsecond=0
+                        )
+                    },
+                    {"$inc": {f"data.{self.get_type(message)}": 1}},
+                    upsert=True,
+                ),
+            ]
         )
 
     @command.filters(filters.admin_only & filters.group)
